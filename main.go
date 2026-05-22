@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -71,9 +72,12 @@ func main() {
 		OutputPath:  opts.outputPath,
 	}
 
-	if err := printer.Render(os.Stdout, result, printerOptions, time.Since(start)); err != nil {
+	bw := bufio.NewWriter(os.Stdout)
+	if err := printer.Render(bw, result, printerOptions, time.Since(start)); err != nil {
+		bw.Flush()
 		fatal(err)
 	}
+	bw.Flush()
 }
 
 func parseCLI(args []string) (cliOptions, error) {
