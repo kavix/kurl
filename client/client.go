@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -42,37 +43,61 @@ func Fetch(opts Options) (*Result, error) {
 }
 
 func fetchConcurrentSchemes(opts Options) (*Result, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	type outcome struct {
 		result *Result
 		err    error
+		id     int
 	}
 
 	results := make(chan outcome, 2)
-	for _, candidate := range []string{"https://" + opts.URL, "http://" + opts.URL} {
+	cancels := make([]context.CancelFunc, 2)
+
+	for id, candidate := range []string{"https://" + opts.URL, "http://" + opts.URL} {
 		candidate := candidate
+		id := id
+		candCtx, candCancel := context.WithCancel(context.Background())
+		cancels[id] = candCancel
 		go func() {
-			result, err := fetchSingleWithContext(ctx, opts, candidate)
-			results <- outcome{result: result, err: err}
+			result, err := fetchSingleWithContext(candCtx, opts, candidate)
+			results <- outcome{result: result, err: err, id: id}
 		}()
 	}
 
 	var lastErr error
 	for i := 0; i < 2; i++ {
-		outcome := <-results
-		if outcome.err == nil && outcome.result != nil {
-			cancel()
-			return outcome.result, nil
+		out := <-results
+		if out.err == nil && out.result != nil {
+			// Success! Cancel the other candidate (the loser)
+			loserID := 1 - out.id
+			cancels[loserID]()
+
+			// Delay the winner's context cancellation until Close() is called on the response body.
+			out.result.Response.Body = &cancelOnCloseReadCloser{
+				ReadCloser: out.result.Response.Body,
+				cancel:     cancels[out.id],
+			}
+			return out.result, nil
 		}
-		lastErr = outcome.err
+		// If it failed, cancel its own context immediately
+		cancels[out.id]()
+		lastErr = out.err
 	}
 
 	if lastErr == nil {
 		lastErr = fmt.Errorf("unable to fetch %q", opts.URL)
 	}
 	return nil, lastErr
+}
+
+type cancelOnCloseReadCloser struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnCloseReadCloser) Close() error {
+	err := c.ReadCloser.Close()
+	c.cancel()
+	return err
 }
 
 func fetchSingle(opts Options, target string) (*Result, error) {
@@ -172,14 +197,17 @@ func resolveHostConcurrent(ctx context.Context, host string) ([]net.IP, error) {
 
 	// 1. Resolve using public Cloudflare DNS 1.1.1.1
 	go func() {
+		cfCtx, cfCancel := context.WithTimeout(ctxCancel, 800*time.Millisecond)
+		defer cfCancel()
+
 		resolver := &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{Timeout: 2 * time.Second}
+				d := net.Dialer{Timeout: 500 * time.Millisecond}
 				return d.DialContext(ctx, network, "1.1.1.1:53")
 			},
 		}
-		ips, err := resolver.LookupIP(ctxCancel, "ip", host)
+		ips, err := resolver.LookupIP(cfCtx, "ip", host)
 		results <- outcome{ips: ips, err: err}
 	}()
 

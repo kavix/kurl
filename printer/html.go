@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"brew-terminal-curl/color"
+
 	"golang.org/x/net/html"
 )
 
