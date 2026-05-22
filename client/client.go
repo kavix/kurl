@@ -35,7 +35,14 @@ type Result struct {
 
 func Fetch(opts Options) (*Result, error) {
 	if hasExplicitScheme(opts.URL) {
-		return fetchSingle(opts, opts.URL, true)
+		res, err := fetchSingle(opts, opts.URL, true)
+		if err == nil {
+			return res, nil
+		}
+		if isDNSFailure(err) {
+			return fetchSingle(opts, opts.URL, false)
+		}
+		return nil, err
 	}
 
 	result, err := fetchConcurrentSchemes(opts, true)
@@ -102,6 +109,13 @@ func fetchSingleWithContext(ctx context.Context, opts Options, target string, us
 	headers, err := parseHeaders(opts.Headers)
 	if err != nil {
 		return nil, err
+	}
+
+	if headers.Get("User-Agent") == "" {
+		headers.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 kurl/1.0")
+	}
+	if headers.Get("Accept") == "" {
+		headers.Set("Accept", "*/*")
 	}
 
 	requestURL := target

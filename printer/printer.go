@@ -176,6 +176,17 @@ func renderBody(w io.Writer, result *client.Result, enabled bool, outputPath str
 		return err
 	}
 
+	if isHTML(contentType) {
+		written, err := PrettyHTML(writer, result.Response.Body, enabled)
+		if err != nil {
+			return err
+		}
+		if written == 0 {
+			_, err = fmt.Fprintln(writer, "No body")
+		}
+		return err
+	}
+
 	written, err := io.Copy(writer, result.Response.Body)
 	if err != nil {
 		return err
@@ -199,6 +210,11 @@ func isBinary(contentType string) bool {
 		return false
 	}
 	return !strings.HasPrefix(contentType, "text/") && !strings.Contains(contentType, "/json")
+}
+
+func isHTML(contentType string) bool {
+	contentType = strings.ToLower(contentType)
+	return strings.Contains(contentType, "text/html") || strings.Contains(contentType, "application/xhtml+xml")
 }
 
 func sectionTitle(enabled bool, title string) string {
