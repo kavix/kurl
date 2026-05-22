@@ -7,13 +7,14 @@ It focuses on the things you usually want first: status, timing, protocol, heade
 ## Features
 
 - `kurl [METHOD] <URL> [flags]` command shape.
-- Automatic `https://` and `http://` fallback for bare hosts like `google.lk`.
-- Concurrent scheme probing when no scheme is provided.
-- Tuned HTTP client with keep-alives, HTTP/2, timeouts, and custom DNS dialing.
-- Pretty JSON formatting with recursive color.
-- Raw body mode for exact output.
-- Verbose request/redirect details.
-- Automatic color disabling for non-TTY output or `NO_COLOR`.
+- **Smart HTML Formatter**: Prettifies, auto-indents (2-space), and syntax-highlights HTML responses with smart collapsing for inline element trees.
+- **Parallel DNS Racing**: Concurrently queries public Cloudflare DNS and host system DNS, racing them to connect using the fastest available resolver.
+- **CDN Protection Bypass**: Injects clean browser-like default headers to prevent server-side bot-blocking filters.
+- **Concurrent Protocol Probing**: Probes `https://` and `http://` in parallel when no scheme is provided for quick automatic fallback.
+- **Pretty JSON Formatter**: Formats and styles JSON body responses token-by-token using recursive terminal colors.
+- **Tuned Keep-Alives & HTTP/2**: Forces HTTP/2 where available, with optimized TCP connect and TLS handshake parameters.
+- **Automatic TTY Color detection**: Smart disables terminal color sequences when outputting to files, pipes, or when `NO_COLOR` is present.
+- **Raw & Verbose Output modes**: Toggleable raw bodies and full request/redirect chain diagnostics.
 
 ## Install
 
@@ -188,6 +189,40 @@ Build the optimized binary:
 ```bash
 go build -ldflags="-s -w" -o kurl .
 ```
+
+## Release & Publishing
+
+`kurl` is ready to compile and publish across all platforms (macOS, Linux, Windows) with automated GitHub Releases and Homebrew Tap support using **GoReleaser**.
+
+### 1. Local Pre-check & Snapshot Builds
+To test compile and bundle the binaries locally without pushing or publishing:
+
+```bash
+# Make sure goreleaser is installed
+brew install goreleaser/tap/goreleaser
+
+# Run snapshot build via Makefile
+make release-local
+```
+This builds multi-platform binaries in the `dist/` directory.
+
+### 2. Automating Releases with GitHub Actions
+We've set up a pre-configured CI/CD pipeline in `.github/workflows/release.yml`. When you're ready to publish:
+
+1. Draft a Git version tag:
+   ```bash
+   git tag -a v1.0.0 -m "First release"
+   ```
+2. Push the tag to GitHub:
+   ```bash
+   git push origin v1.0.0
+   ```
+3. The GitHub Action will automatically:
+   - Compile binaries for all target OS and architectures.
+   - Build `.tar.gz` and `.zip` release archives.
+   - Calculate hash checksums.
+   - Publish the artifacts to a new GitHub Release.
+   - Automatically push the formula file to your Homebrew Tap (`homebrew-tap`).
 
 ## Notes
 

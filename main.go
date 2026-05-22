@@ -153,7 +153,11 @@ func parseCLI(args []string) (cliOptions, error) {
 	if err != nil {
 		return options, err
 	}
-	options.method = method
+	if len(positional) == 2 {
+		options.method = method
+	} else if options.method == "" || options.method == "GET" {
+		options.method = method
+	}
 	options.url = urlValue
 
 	if options.headersOnly && options.bodyOnly {

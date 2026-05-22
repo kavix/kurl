@@ -1,0 +1,56 @@
+# .goreleaser.yaml
+# Complete release configuration for kurl CLI
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    # use zip for windows archives
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+checksum:
+  name_template: 'checksums.txt'
+
+# Option to publish to a Homebrew Tap automatically
+brews:
+  - name: kurl
+    repository:
+      owner: kavix
+      name: homebrew-tap
+    directory: Formula
+    homepage: "https://github.com/kavix/kurl"
+    description: "A fast, colorized Go CLI for viewing HTTP API responses in a clean, human-readable format."
+    license: "MIT"
+    install: |
+      bin.install "kurl"

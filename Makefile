@@ -1,7 +1,7 @@
 APP := .
 INSTALL_BIN_DIR ?= $(HOME)/.local/bin
 
-.PHONY: run test build install
+.PHONY: run test build install release-local clean
 
 run:
 	go run $(APP) $(ARGS)
@@ -14,3 +14,10 @@ build:
 
 install:
 	go build -ldflags="-s -w" -o $(INSTALL_BIN_DIR)/kurl $(APP)
+
+release-local:
+	goreleaser release --snapshot --clean
+
+clean:
+	rm -f kurl
+	rm -rf dist

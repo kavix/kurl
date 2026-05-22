@@ -35,29 +35,13 @@ type Result struct {
 
 func Fetch(opts Options) (*Result, error) {
 	if hasExplicitScheme(opts.URL) {
-		res, err := fetchSingle(opts, opts.URL, true)
-		if err == nil {
-			return res, nil
-		}
-		if isDNSFailure(err) {
-			return fetchSingle(opts, opts.URL, false)
-		}
-		return nil, err
+		return fetchSingle(opts, opts.URL)
 	}
 
-	result, err := fetchConcurrentSchemes(opts, true)
-	if err == nil {
-		return result, nil
-	}
-
-	if isDNSFailure(err) {
-		return fetchConcurrentSchemes(opts, false)
-	}
-
-	return nil, err
+	return fetchConcurrentSchemes(opts)
 }
 
-func fetchConcurrentSchemes(opts Options, usePublicDNS bool) (*Result, error) {
+func fetchConcurrentSchemes(opts Options) (*Result, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -70,7 +54,7 @@ func fetchConcurrentSchemes(opts Options, usePublicDNS bool) (*Result, error) {
 	for _, candidate := range []string{"https://" + opts.URL, "http://" + opts.URL} {
 		candidate := candidate
 		go func() {
-			result, err := fetchSingleWithContext(ctx, opts, candidate, usePublicDNS)
+			result, err := fetchSingleWithContext(ctx, opts, candidate)
 			results <- outcome{result: result, err: err}
 		}()
 	}
@@ -91,13 +75,13 @@ func fetchConcurrentSchemes(opts Options, usePublicDNS bool) (*Result, error) {
 	return nil, lastErr
 }
 
-func fetchSingle(opts Options, target string, usePublicDNS bool) (*Result, error) {
+func fetchSingle(opts Options, target string) (*Result, error) {
 	ctx := context.Background()
-	return fetchSingleWithContext(ctx, opts, target, usePublicDNS)
+	return fetchSingleWithContext(ctx, opts, target)
 }
 
-func fetchSingleWithContext(ctx context.Context, opts Options, target string, usePublicDNS bool) (*Result, error) {
-	transport := tunedTransport(usePublicDNS)
+func fetchSingleWithContext(ctx context.Context, opts Options, target string) (*Result, error) {
+	transport := tunedTransport()
 	cli := &http.Client{
 		Transport: transport,
 		Timeout:   opts.Timeout,
@@ -172,29 +156,85 @@ func hasExplicitScheme(rawURL string) bool {
 	return strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://")
 }
 
-func tunedTransport(usePublicDNS bool) *http.Transport {
-	var resolver *net.Resolver
-	if usePublicDNS {
-		resolver = &net.Resolver{
+func resolveHostConcurrent(ctx context.Context, host string) ([]net.IP, error) {
+	if net.ParseIP(host) != nil {
+		return []net.IP{net.ParseIP(host)}, nil
+	}
+
+	type outcome struct {
+		ips []net.IP
+		err error
+	}
+
+	results := make(chan outcome, 2)
+	ctxCancel, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// 1. Resolve using public Cloudflare DNS 1.1.1.1
+	go func() {
+		resolver := &net.Resolver{
 			PreferGo: true,
 			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{Timeout: 5 * time.Second}
+				d := net.Dialer{Timeout: 2 * time.Second}
 				return d.DialContext(ctx, network, "1.1.1.1:53")
 			},
 		}
-	} else {
-		resolver = net.DefaultResolver
+		ips, err := resolver.LookupIP(ctxCancel, "ip", host)
+		results <- outcome{ips: ips, err: err}
+	}()
+
+	// 2. Resolve using default System Resolver
+	go func() {
+		ips, err := net.DefaultResolver.LookupIP(ctxCancel, "ip", host)
+		results <- outcome{ips: ips, err: err}
+	}()
+
+	var lastErr error
+	for i := 0; i < 2; i++ {
+		select {
+		case out := <-results:
+			if out.err == nil && len(out.ips) > 0 {
+				cancel()
+				return out.ips, nil
+			}
+			lastErr = out.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
+	return nil, lastErr
+}
+
+func tunedTransport() *http.Transport {
 	dialer := &net.Dialer{
 		Timeout:   5 * time.Second,
 		KeepAlive: 30 * time.Second,
-		Resolver:  resolver,
 	}
 
 	return &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialer.DialContext,
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+
+			ips, err := resolveHostConcurrent(ctx, host)
+			if err != nil {
+				return dialer.DialContext(ctx, network, addr)
+			}
+
+			var dialErr error
+			for _, ip := range ips {
+				conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+				if err == nil {
+					return conn, nil
+				}
+				dialErr = err
+			}
+			return nil, dialErr
+		},
 		ForceAttemptHTTP2:     true,
 		DisableKeepAlives:     false,
 		MaxIdleConns:          100,
@@ -243,12 +283,4 @@ func redirectRequest(method string, statusCode int, body []byte) (string, []byte
 
 func isRedirect(code int) bool {
 	return code >= 300 && code < 400
-}
-
-func isDNSFailure(err error) bool {
-	if err == nil {
-		return false
-	}
-	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "lookup") || strings.Contains(text, "dns") || strings.Contains(text, "read udp") || strings.Contains(text, "no such host")
 }
