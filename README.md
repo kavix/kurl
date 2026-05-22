@@ -128,6 +128,25 @@ Uses a full tree-parser to restructure documents with beautiful indentations:
 
 ---
 
+## 🛠️ Troubleshooting
+
+### `zsh: no matches found` error
+If you use **Zsh** and run a command with an unquoted URL containing question marks (`?`), ampersands (`&`), or equal signs (`=`), you may get a `zsh: no matches found` error. This is because Zsh attempts to expand these characters as wildcard globs.
+
+**Solution 1 (Temporary):** Wrap your URLs in quotes:
+```bash
+kurl "https://api.example.com/?search=query"
+```
+
+**Solution 2 (Permanent & Recommended):** Add an alias to your `~/.zshrc` file that tells Zsh to automatically disable glob expansion specifically for the `kurl` command:
+```bash
+# Add this line to your ~/.zshrc
+alias kurl="noglob kurl"
+```
+After saving, run `source ~/.zshrc`. You can now pass raw URLs to `kurl` without ever needing quotes again!
+
+---
+
 ## 🔧 Developer & Contribution Guide
 
 ### Running Tests
