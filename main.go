@@ -32,6 +32,7 @@ type cliOptions struct {
 	outputPath   string
 	showHelp     bool
 	showVersion  bool
+	installAlias bool
 }
 
 func main() {
@@ -45,6 +46,10 @@ func main() {
 	}
 	if opts.showHelp {
 		printUsage()
+		return
+	}
+	if opts.installAlias {
+		installShellAlias()
 		return
 	}
 
@@ -89,6 +94,8 @@ func parseCLI(args []string) (cliOptions, error) {
 		switch {
 		case arg == "-h" || arg == "--help":
 			options.showHelp = true
+		case arg == "--install-alias":
+			options.installAlias = true
 		case arg == "--version" || arg == "-V":
 			options.showVersion = true
 		case arg == "-X" || arg == "--method":
@@ -249,4 +256,38 @@ func printUsage() {
 	fmt.Fprintln(os.Stdout, "  --raw             Raw output, no formatting")
 	fmt.Fprintln(os.Stdout, "  -v, --verbose     Show request info too")
 	fmt.Fprintln(os.Stdout, "  -o, --output      Save body to file")
+	fmt.Fprintln(os.Stdout, "  --install-alias   Install zsh/bash alias to prevent url globbing")
+}
+
+func installShellAlias() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fatal(err)
+	}
+
+	zshrcPath := home + "/.zshrc"
+	aliasLine := `alias kurl="noglob kurl"`
+
+	content, err := os.ReadFile(zshrcPath)
+	if err != nil && !os.IsNotExist(err) {
+		fatal(err)
+	}
+
+	if strings.Contains(string(content), aliasLine) {
+		fmt.Println("Alias already exists in " + zshrcPath)
+		return
+	}
+
+	f, err := os.OpenFile(zshrcPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fatal(err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString("\n# Prevent zsh from breaking on URLs with ? and &\n" + aliasLine + "\n"); err != nil {
+		fatal(err)
+	}
+
+	fmt.Println("✅ Successfully added 'noglob' alias to " + zshrcPath)
+	fmt.Println("Please run 'source ~/.zshrc' or restart your terminal to apply the changes.")
 }
