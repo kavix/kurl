@@ -48,6 +48,7 @@ brews:
     repository:
       owner: kavix
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/kavix/kurl"
     description: "A fast, colorized Go CLI for viewing HTTP API responses in a clean, human-readable format."
