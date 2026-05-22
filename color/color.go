@@ -8,16 +8,16 @@ import (
 )
 
 const (
-	Reset = "\033[0m"
-	Bold  = "\033[1m"
-	Dim   = "\033[2m"
-	Red   = "\033[31m"
-	Green = "\033[32m"
-	Yellow = "\033[33m"
-	Blue  = "\033[34m"
+	Reset   = "\033[0m"
+	Bold    = "\033[1m"
+	Dim     = "\033[2m"
+	Red     = "\033[31m"
+	Green   = "\033[32m"
+	Yellow  = "\033[33m"
+	Blue    = "\033[34m"
 	Magenta = "\033[35m"
-	Cyan  = "\033[36m"
-	White = "\033[37m"
+	Cyan    = "\033[36m"
+	White   = "\033[37m"
 )
 
 func AutoEnabled(w io.Writer) bool {
@@ -62,7 +62,7 @@ func Bool(enabled bool, value string) string   { return Wrap(enabled, Magenta, v
 func Null(enabled bool, value string) string   { return Wrap(enabled, Red, value) }
 
 func ErrorText(enabled bool, value string) string { return Wrap(enabled, Red, value) }
-func Box(enabled bool, lines ...string) string { return strings.Join(lines, "\n") }
+func Box(enabled bool, lines ...string) string    { return strings.Join(lines, "\n") }
 
 func Fprintf(w io.Writer, format string, args ...any) (int, error) {
 	return fmt.Fprintf(w, format, args...)

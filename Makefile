@@ -1,7 +1,7 @@
 APP := .
 INSTALL_BIN_DIR ?= $(HOME)/.local/bin
 
-.PHONY: run test build install release-local clean
+.PHONY: run test build install release-local clean fmt lint
 
 run:
 	go run $(APP) $(ARGS)
@@ -21,3 +21,9 @@ release-local:
 clean:
 	rm -f kurl
 	rm -rf dist
+
+fmt:
+	go fmt ./...
+
+lint:
+	golangci-lint run
