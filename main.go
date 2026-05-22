@@ -11,6 +11,12 @@ import (
 	"brew-terminal-curl/printer"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 type cliOptions struct {
 	method       string
 	url          string
@@ -24,12 +30,17 @@ type cliOptions struct {
 	verbose      bool
 	outputPath   string
 	showHelp     bool
+	showVersion  bool
 }
 
 func main() {
 	opts, err := parseCLI(os.Args[1:])
 	if err != nil {
 		fatal(err)
+	}
+	if opts.showVersion {
+		fmt.Printf("kurl version %s (commit: %s, built at: %s)\n", version, commit, date)
+		return
 	}
 	if opts.showHelp {
 		printUsage()
@@ -74,6 +85,8 @@ func parseCLI(args []string) (cliOptions, error) {
 		switch {
 		case arg == "-h" || arg == "--help":
 			options.showHelp = true
+		case arg == "--version" || arg == "-V":
+			options.showVersion = true
 		case arg == "-X" || arg == "--method":
 			value, next, err := takeValue(args, i)
 			if err != nil {
