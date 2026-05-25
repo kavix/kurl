@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-25
+
 ### Added
+- Terminal-native request saving (`save`) and replaying (`run`) subcommands with option overrides.
+- Asynchronous interactive WebSocket sessions (`ws://` and `wss://`) featuring green `[RECV] <` and cyan `[SEND] >` frames.
+- Automatic JSON pretty printing and colorizing for WebSocket frames.
+- Environment Variable Profiles (`-e` / `--env`) to map base URLs and merge authentication headers dynamically.
+- Automatically generated environment templates in `~/.kurl/environments.json`.
 - Created `docs/` directory for detailed documentation architecture (`USAGE.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`).
 - Added issue templates for Bug Reports and Feature Requests.
 - Added Pull Request template to standardize external contributions.
