@@ -83,6 +83,11 @@ func main() {
 }
 
 func runRequest(opts cliOptions) {
+	if strings.HasPrefix(opts.url, "ws://") || strings.HasPrefix(opts.url, "wss://") {
+		runWebSocket(opts)
+		return
+	}
+
 	useColor := color.AutoEnabled(os.Stdout) && !opts.noColor
 	start := time.Now()
 

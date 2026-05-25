@@ -56,6 +56,9 @@ kurl save github-api GET https://api.github.com/users/kavix -H "Accept: applicat
 
 # Replay the request with optional parameter overrides
 kurl run github-api -v
+
+# Open an interactive WebSocket session with colorized frames
+kurl ws://echo.websocket.org
 ```
 
 ## 📚 Documentation

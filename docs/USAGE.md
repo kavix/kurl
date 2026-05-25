@@ -12,6 +12,9 @@ kurl https://api.genderize.io/?name=luc
 
 # Fetch a webpage with automatic scheme probing (http:// vs https://) and smart HTML rendering
 kurl news.lk
+
+# Connect to an interactive WebSocket session with colorized frames
+kurl ws://echo.websocket.org
 ```
 
 ## Advanced Requests
