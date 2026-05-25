@@ -34,6 +34,7 @@ type cliOptions struct {
 	showHelp     bool
 	showVersion  bool
 	installAlias bool
+	env          string
 }
 
 type savedRequest struct {
@@ -48,6 +49,7 @@ type savedRequest struct {
 	Raw         bool     `json:"raw,omitempty"`
 	Verbose     bool     `json:"verbose,omitempty"`
 	OutputPath  string   `json:"output_path,omitempty"`
+	Env         string   `json:"env,omitempty"`
 }
 
 func main() {
@@ -83,6 +85,10 @@ func main() {
 }
 
 func runRequest(opts cliOptions) {
+	if err := applyEnvironment(&opts); err != nil {
+		fatal(err)
+	}
+
 	if strings.HasPrefix(opts.url, "ws://") || strings.HasPrefix(opts.url, "wss://") {
 		runWebSocket(opts)
 		return
@@ -207,6 +213,7 @@ func saveRequestLocally(name string, opts cliOptions) error {
 		Raw:         opts.raw,
 		Verbose:     opts.verbose,
 		OutputPath:  opts.outputPath,
+		Env:         opts.env,
 	}
 
 	data, err := json.MarshalIndent(req, "", "  ")
@@ -268,6 +275,7 @@ func loadRequestLocally(name string) (cliOptions, error) {
 	options.raw = req.Raw
 	options.verbose = req.Verbose
 	options.outputPath = req.OutputPath
+	options.env = req.Env
 
 	return options, nil
 }
@@ -353,6 +361,15 @@ func parseCLIWithBase(base cliOptions, args []string) (cliOptions, error) {
 			i = next
 		case strings.HasPrefix(arg, "-o=") || strings.HasPrefix(arg, "--output="):
 			options.outputPath = strings.SplitN(arg, "=", 2)[1]
+		case arg == "-e" || arg == "--env":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			options.env = value
+			i = next
+		case strings.HasPrefix(arg, "-e=") || strings.HasPrefix(arg, "--env="):
+			options.env = strings.SplitN(arg, "=", 2)[1]
 		case strings.HasPrefix(arg, "-"):
 			return options, fmt.Errorf("unknown flag %q", arg)
 		default:
@@ -443,6 +460,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stdout, "  run <name> [overrides...] Replay a saved request configuration")
 	fmt.Fprintln(os.Stdout, "")
 	fmt.Fprintln(os.Stdout, "Flags:")
+	fmt.Fprintln(os.Stdout, "  -e, --env         Environment profile name (dev/prod/etc.)")
 	fmt.Fprintln(os.Stdout, "  -X, --method      HTTP method (default GET)")
 	fmt.Fprintln(os.Stdout, "  -d, --data        Request body")
 	fmt.Fprintln(os.Stdout, "  -H, --header      Add header (repeatable)")

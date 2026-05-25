@@ -66,6 +66,25 @@ kurl run github-api -v -H "Authorization: Bearer my-token"
 ```
 Profiles are saved as JSON files in `~/.kurl/requests/<name>.json`.
 
+## 🌐 Environment Profiles
+
+Instead of hardcoding full URLs or authorization tokens across multiple requests, you can use the `-e` or `--env` flag to load environment configurations from `~/.kurl/environments.json`.
+
+```bash
+# Query relative path under the 'dev' environment profile
+kurl --env dev /users -v
+
+# Query relative path under the 'prod' environment profile
+kurl --env prod /users -v
+```
+
+You can override environment headers dynamically:
+```bash
+kurl --env dev /users -v -H "Authorization: Bearer custom-override-token"
+```
+
+A default template file is automatically generated at `~/.kurl/environments.json` the first time you run a command with `--env`.
+
 ## Output Control & Tracing
 
 ### Verbose Mode
@@ -100,6 +119,7 @@ kurl --raw -o response.html https://example.com
 | Flag | Short | Description | Default |
 | :--- | :--- | :--- | :--- |
 | `--method` | `-X` | The HTTP request method | `GET` |
+| `--env` | `-e` | Load environment profile (URL & headers) | *None* |
 | `--data` | `-d` | Request body payload (JSON, raw text, etc.) | *None* |
 | `--header` | `-H` | Custom request header (repeatable) | *None* |
 | `--timeout` | `-t` | Max connection and transfer timeout in seconds | `30` |

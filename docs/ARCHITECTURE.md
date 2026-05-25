@@ -52,3 +52,19 @@ If the output is redirected, `kurl` seamlessly and silently strips all ANSI esca
 
 ## CDN & Anti-Bot Bypass
 Many modern APIs and web servers sit behind CDN firewalls (Cloudflare, Akamai, etc.) that reject requests lacking standard headers. `kurl` preemptively injects standard modern browser headers (`User-Agent` and `Accept`) to bypass these anti-bot blocking layers, resulting in higher success rates for CLI-based requests out of the box.
+
+## Request Replays & Serialization
+`kurl` stores profiles under `~/.kurl/requests/<name>.json` using a custom `savedRequest` schema.
+*   **Merger Parser**: Replaying configurations merges base configurations with CLI options dynamically. When parsing override arguments, the parser is seeded with the loaded configuration, allowing CLI values to replace or append to the loaded parameters.
+*   **Validation**: Sanitizes file path names to prevent directory traversal attacks (e.g. `save ../../bad`).
+
+## Interactive WebSocket Duplex Engine
+When routing connections to `ws://` or `wss://`, `kurl` bypasses standard HTTP fetching and launches an asynchronous duplex network loop:
+*   **Asynchronous Reader**: Spawns a background goroutine to read frames from the WebSocket stream, checking if message payloads are valid JSON to format them dynamically via the token-by-token highlighter.
+*   **Sender loop**: Uses the main thread to scan standard input and send text messages directly to the socket connection.
+
+## Environment Variable Profile Mapping
+Enabling `--env <profile>` loads configuration mappings from `~/.kurl/environments.json`.
+*   **Case-insensitive Header Merging**: Profile headers are merged with CLI overrides. If a header key passed on the CLI overrides a profile header, the profile header is replaced in-place, keeping ordering and avoiding duplicates.
+*   **Safe URL Joiner**: Safely concatenates environment base URLs with target relative paths, stripping duplicate slashes cleanly.
+

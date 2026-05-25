@@ -15,6 +15,9 @@ Forget raw, unformatted, monochrome terminal dumps. `kurl` focuses on the inform
 *   **🎨 Token-by-Token Formatter**: Parses JSON on the fly, rendering with strict indentation and harmonized syntax-highlighting.
 *   **🌳 Smart HTML Pretty-Printer**: Leverages an HTML5 DOM parser to format structure cleanly and collapse inline element nodes to avoid line bloat.
 *   **🛡️ Anti-Bot Bypass**: Automatically injects standard modern browser headers to prevent anti-bot blocking layers from rejecting your CLI requests.
+*   **💾 Request Replays**: Save request profiles locally (like a terminal-native Postman) and replay them with option overrides.
+*   **💬 Interactive WebSockets**: Connect to WebSocket endpoints with real-time duplex text frames and colorized formatted messages.
+*   **🌐 Environment Profiles**: Switch base URLs and auth headers dynamically between dev/staging/prod environments using local configuration profiles.
 
 ## 📦 Installation
 
@@ -59,6 +62,9 @@ kurl run github-api -v
 
 # Open an interactive WebSocket session with colorized frames
 kurl ws://echo.websocket.org
+
+# Execute request under the 'prod' environment profile mapping base URL and auth headers
+kurl --env prod /users
 ```
 
 ## 📚 Documentation
