@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -35,7 +36,32 @@ type cliOptions struct {
 	installAlias bool
 }
 
+type savedRequest struct {
+	Method      string   `json:"method"`
+	URL         string   `json:"url"`
+	Data        string   `json:"data,omitempty"`
+	Headers     []string `json:"headers,omitempty"`
+	Timeout     string   `json:"timeout,omitempty"`
+	NoColor     bool     `json:"no_color,omitempty"`
+	HeadersOnly bool     `json:"headers_only,omitempty"`
+	BodyOnly    bool     `json:"body_only,omitempty"`
+	Raw         bool     `json:"raw,omitempty"`
+	Verbose     bool     `json:"verbose,omitempty"`
+	OutputPath  string   `json:"output_path,omitempty"`
+}
+
 func main() {
+	if len(os.Args) > 1 {
+		cmd := os.Args[1]
+		if cmd == "save" {
+			handleSaveCommand(os.Args[2:])
+			return
+		} else if cmd == "run" {
+			handleRunCommand(os.Args[2:])
+			return
+		}
+	}
+
 	opts, err := parseCLI(os.Args[1:])
 	if err != nil {
 		fatal(err)
@@ -53,6 +79,10 @@ func main() {
 		return
 	}
 
+	runRequest(opts)
+}
+
+func runRequest(opts cliOptions) {
 	useColor := color.AutoEnabled(os.Stdout) && !opts.noColor
 	start := time.Now()
 
@@ -85,8 +115,164 @@ func main() {
 	bw.Flush()
 }
 
-func parseCLI(args []string) (cliOptions, error) {
+func handleSaveCommand(args []string) {
+	if len(args) == 0 {
+		fatal(fmt.Errorf("error: save command requires a request name\nUsage: kurl save <name> [METHOD] <URL> [flags]"))
+	}
+	name := args[0]
+	if !isValidRequestName(name) {
+		fatal(fmt.Errorf("error: invalid request name %q (only alphanumeric, hyphens, and underscores allowed)", name))
+	}
+
+	if len(args[1:]) == 0 {
+		fatal(fmt.Errorf("error: please provide the request details to save\nExample: kurl save %s GET https://api.github.com/users/kavix", name))
+	}
+
+	opts, err := parseCLI(args[1:])
+	if err != nil {
+		fatal(err)
+	}
+
+	if opts.url == "" {
+		fatal(fmt.Errorf("error: cannot save a request without a URL"))
+	}
+
+	err = saveRequestLocally(name, opts)
+	if err != nil {
+		fatal(err)
+	}
+
+	fmt.Printf("💾 Saved request %q locally.\n", name)
+}
+
+func handleRunCommand(args []string) {
+	if len(args) == 0 {
+		fatal(fmt.Errorf("error: run command requires a request name\nUsage: kurl run <name> [overrides...]"))
+	}
+	name := args[0]
+
+	opts, err := loadRequestLocally(name)
+	if err != nil {
+		fatal(err)
+	}
+
+	// Apply optional command-line overrides
+	if len(args[1:]) > 0 {
+		opts, err = parseCLIWithBase(opts, args[1:])
+		if err != nil {
+			fatal(err)
+		}
+	}
+
+	runRequest(opts)
+}
+
+func isValidRequestName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func saveRequestLocally(name string, opts cliOptions) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("unable to find home directory: %w", err)
+	}
+
+	dir := home + "/.kurl/requests"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("unable to create config directory: %w", err)
+	}
+
+	req := savedRequest{
+		Method:      opts.method,
+		URL:         opts.url,
+		Data:        opts.data,
+		Headers:     opts.headers,
+		Timeout:     opts.timeout.String(),
+		NoColor:     opts.noColor,
+		HeadersOnly: opts.headersOnly,
+		BodyOnly:    opts.bodyOnly,
+		Raw:         opts.raw,
+		Verbose:     opts.verbose,
+		OutputPath:  opts.outputPath,
+	}
+
+	data, err := json.MarshalIndent(req, "", "  ")
+	if err != nil {
+		return fmt.Errorf("unable to serialize request: %w", err)
+	}
+
+	filePath := dir + "/" + name + ".json"
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return fmt.Errorf("unable to write request file: %w", err)
+	}
+
+	return nil
+}
+
+func loadRequestLocally(name string) (cliOptions, error) {
 	options := cliOptions{method: "GET", timeout: 30 * time.Second}
+	if !isValidRequestName(name) {
+		return options, fmt.Errorf("invalid request name %q (only alphanumeric, hyphens, and underscores allowed)", name)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return options, fmt.Errorf("unable to find home directory: %w", err)
+	}
+
+	filePath := home + "/.kurl/requests/" + name + ".json"
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return options, fmt.Errorf("request %q not found. Save it first using 'kurl save %s <args>'", name, name)
+		}
+		return options, fmt.Errorf("unable to read request file: %w", err)
+	}
+
+	var req savedRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return options, fmt.Errorf("unable to parse request file: %w", err)
+	}
+
+	var timeout time.Duration
+	if req.Timeout != "" {
+		timeout, err = time.ParseDuration(req.Timeout)
+		if err != nil {
+			timeout = 30 * time.Second
+		}
+	} else {
+		timeout = 30 * time.Second
+	}
+
+	options.method = req.Method
+	options.url = req.URL
+	options.data = req.Data
+	options.headers = req.Headers
+	options.timeout = timeout
+	options.noColor = req.NoColor
+	options.headersOnly = req.HeadersOnly
+	options.bodyOnly = req.BodyOnly
+	options.raw = req.Raw
+	options.verbose = req.Verbose
+	options.outputPath = req.OutputPath
+
+	return options, nil
+}
+
+func parseCLI(args []string) (cliOptions, error) {
+	return parseCLIWithBase(cliOptions{method: "GET", timeout: 30 * time.Second}, args)
+}
+
+func parseCLIWithBase(base cliOptions, args []string) (cliOptions, error) {
+	options := base
 	var positional []string
 
 	for i := 0; i < len(args); i++ {
@@ -173,16 +359,18 @@ func parseCLI(args []string) (cliOptions, error) {
 		return options, nil
 	}
 
-	method, urlValue, err := resolveTarget(positional)
-	if err != nil {
-		return options, err
+	if len(positional) > 0 {
+		method, urlValue, err := resolveTarget(positional)
+		if err != nil {
+			return options, err
+		}
+		if len(positional) == 2 {
+			options.method = method
+		} else if options.method == "" || options.method == "GET" {
+			options.method = method
+		}
+		options.url = urlValue
 	}
-	if len(positional) == 2 {
-		options.method = method
-	} else if options.method == "" || options.method == "GET" {
-		options.method = method
-	}
-	options.url = urlValue
 
 	if options.headersOnly && options.bodyOnly {
 		return options, fmt.Errorf("--headers-only and --body-only cannot be used together")
@@ -243,7 +431,11 @@ func fatal(err error) {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stdout, "kurl [METHOD] <URL> [flags]")
+	fmt.Fprintln(os.Stdout, "kurl [COMMAND] [args...] / kurl [METHOD] <URL> [flags]")
+	fmt.Fprintln(os.Stdout, "")
+	fmt.Fprintln(os.Stdout, "Commands:")
+	fmt.Fprintln(os.Stdout, "  save <name> [args...] Save a request configuration locally")
+	fmt.Fprintln(os.Stdout, "  run <name> [overrides...] Replay a saved request configuration")
 	fmt.Fprintln(os.Stdout, "")
 	fmt.Fprintln(os.Stdout, "Flags:")
 	fmt.Fprintln(os.Stdout, "  -X, --method      HTTP method (default GET)")
