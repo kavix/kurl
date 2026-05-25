@@ -50,6 +50,12 @@ kurl POST https://api.example.com/v1/users \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer my-secret-token" \
   -d '{"name": "Alice", "role": "admin"}'
+
+# Save a request configuration locally
+kurl save github-api GET https://api.github.com/users/kavix -H "Accept: application/json"
+
+# Replay the request with optional parameter overrides
+kurl run github-api -v
 ```
 
 ## 📚 Documentation

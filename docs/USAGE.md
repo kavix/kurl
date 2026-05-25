@@ -35,6 +35,34 @@ kurl GET https://api.github.com/users/kavix \
   -H "Accept: application/vnd.github.v3+json"
 ```
 
+## 💾 Saving & Replaying Requests
+
+`kurl` allows you to save request configurations locally and replay them instantly (like a terminal-native Postman profile).
+
+### Save a request:
+```bash
+kurl save <name> [METHOD] <URL> [flags]
+```
+Example:
+```bash
+kurl save github-api GET https://api.github.com/users/kavix -H "Accept: application/vnd.github.v3+json"
+```
+
+### Replay a request:
+```bash
+kurl run <name> [overrides...]
+```
+Example:
+```bash
+kurl run github-api
+```
+
+You can pass additional flags during replay to override or extend parameters:
+```bash
+kurl run github-api -v -H "Authorization: Bearer my-token"
+```
+Profiles are saved as JSON files in `~/.kurl/requests/<name>.json`.
+
 ## Output Control & Tracing
 
 ### Verbose Mode
