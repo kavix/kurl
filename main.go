@@ -322,6 +322,7 @@ func parseMaxRedirects(value string) (int, error) {
 		return 0, fmt.Errorf("invalid max-redirects %q: want a non-negative integer", value)
 	}
 	return n, nil
+}
 // parseTimeout interprets the value passed to --timeout/-t.
 //
 // A bare number (e.g. "30" or "0.5") is treated as seconds, matching the
