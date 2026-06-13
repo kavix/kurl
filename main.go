@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -280,6 +281,36 @@ func loadRequestLocally(name string) (cliOptions, error) {
 	return options, nil
 }
 
+// parseTimeout interprets the value passed to --timeout/-t.
+//
+// A bare number (e.g. "30" or "0.5") is treated as seconds, matching the
+// documented "--timeout <seconds>" default. Any other value is parsed as a Go
+// duration string, so "5s", "1m", "500ms" and "1m30s" all work as the user
+// would expect. (The previous behaviour appended "s" unconditionally, which
+// turned "1m" into "1ms" and rejected "500ms" outright.)
+func parseTimeout(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, fmt.Errorf("invalid timeout %q: empty value", value)
+	}
+
+	if seconds, err := strconv.ParseFloat(value, 64); err == nil {
+		if seconds < 0 {
+			return 0, fmt.Errorf("invalid timeout %q: must not be negative", value)
+		}
+		return time.Duration(seconds * float64(time.Second)), nil
+	}
+
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid timeout %q: want a number of seconds or a duration like 5s, 1m, 500ms", value)
+	}
+	if duration < 0 {
+		return 0, fmt.Errorf("invalid timeout %q: must not be negative", value)
+	}
+	return duration, nil
+}
+
 func parseCLI(args []string) (cliOptions, error) {
 	return parseCLIWithBase(cliOptions{method: "GET", timeout: 30 * time.Second}, args)
 }
@@ -329,17 +360,17 @@ func parseCLIWithBase(base cliOptions, args []string) (cliOptions, error) {
 			if err != nil {
 				return options, err
 			}
-			duration, err := time.ParseDuration(value + "s")
+			duration, err := parseTimeout(value)
 			if err != nil {
-				return options, fmt.Errorf("invalid timeout %q: %w", value, err)
+				return options, err
 			}
 			options.timeout = duration
 			i = next
 		case strings.HasPrefix(arg, "-t=") || strings.HasPrefix(arg, "--timeout="):
 			value := strings.SplitN(arg, "=", 2)[1]
-			duration, err := time.ParseDuration(value + "s")
+			duration, err := parseTimeout(value)
 			if err != nil {
-				return options, fmt.Errorf("invalid timeout %q: %w", value, err)
+				return options, err
 			}
 			options.timeout = duration
 		case arg == "--no-color":
@@ -464,7 +495,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stdout, "  -X, --method      HTTP method (default GET)")
 	fmt.Fprintln(os.Stdout, "  -d, --data        Request body")
 	fmt.Fprintln(os.Stdout, "  -H, --header      Add header (repeatable)")
-	fmt.Fprintln(os.Stdout, "  -t, --timeout     Timeout in seconds (default 30)")
+	fmt.Fprintln(os.Stdout, "  -t, --timeout     Timeout: seconds or duration (30, 5s, 1m, 500ms; default 30s)")
 	fmt.Fprintln(os.Stdout, "  --no-color        Disable color output")
 	fmt.Fprintln(os.Stdout, "  --headers-only    Show only response headers")
 	fmt.Fprintln(os.Stdout, "  --body-only       Show only response body")
