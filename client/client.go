@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -40,6 +41,23 @@ func Fetch(opts Options) (*Result, error) {
 	}
 
 	return fetchConcurrentSchemes(opts)
+}
+
+// annotateTimeout replaces the http.Client's generic timeout error
+// (e.g. `Get "https://…": context deadline exceeded`) with a clear,
+// user-facing message that names the configured timeout. Non-timeout
+// errors are returned unchanged.
+func annotateTimeout(err error, timeout time.Duration) error {
+	var urlErr *url.Error
+	isTimeout := (errors.As(err, &urlErr) && urlErr.Timeout()) ||
+		errors.Is(err, context.DeadlineExceeded)
+	if !isTimeout {
+		return err
+	}
+	if timeout > 0 {
+		return fmt.Errorf("request timed out after %s (increase or disable with --timeout)", timeout)
+	}
+	return fmt.Errorf("request timed out")
 }
 
 func fetchConcurrentSchemes(opts Options) (*Result, error) {
@@ -148,7 +166,7 @@ func fetchSingleWithContext(ctx context.Context, opts Options, target string) (*
 
 		resp, err := cli.Do(req)
 		if err != nil {
-			return nil, err
+			return nil, annotateTimeout(err, opts.Timeout)
 		}
 
 		if location := resp.Header.Get("Location"); isRedirect(resp.StatusCode) && location != "" {
