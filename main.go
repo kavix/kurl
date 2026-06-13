@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,36 +21,57 @@ var (
 )
 
 type cliOptions struct {
-	method       string
-	url          string
-	data         string
-	headers      []string
-	timeout      time.Duration
-	noColor      bool
-	headersOnly  bool
-	bodyOnly     bool
-	raw          bool
-	verbose      bool
-	outputPath   string
-	showHelp     bool
-	showVersion  bool
-	installAlias bool
-	env          string
+	method          string
+	url             string
+	data            string
+	headers         []string
+	timeout         time.Duration
+	followRedirects bool
+	maxRedirects    int
+	noColor         bool
+	headersOnly     bool
+	bodyOnly        bool
+	raw             bool
+	verbose         bool
+	outputPath      string
+	showHelp        bool
+	showVersion     bool
+	installAlias    bool
+	env             string
+}
+
+// defaultMaxRedirects is the number of redirects followed before kurl gives up,
+// used whenever the user doesn't pass --max-redirects.
+const defaultMaxRedirects = 10
+
+// baseOptions returns a cliOptions seeded with the defaults shared by every
+// entry point (fresh CLI parse, save, and run).
+func baseOptions() cliOptions {
+	return cliOptions{
+		method:          "GET",
+		timeout:         30 * time.Second,
+		followRedirects: true,
+		maxRedirects:    defaultMaxRedirects,
+	}
 }
 
 type savedRequest struct {
-	Method      string   `json:"method"`
-	URL         string   `json:"url"`
-	Data        string   `json:"data,omitempty"`
-	Headers     []string `json:"headers,omitempty"`
-	Timeout     string   `json:"timeout,omitempty"`
-	NoColor     bool     `json:"no_color,omitempty"`
-	HeadersOnly bool     `json:"headers_only,omitempty"`
-	BodyOnly    bool     `json:"body_only,omitempty"`
-	Raw         bool     `json:"raw,omitempty"`
-	Verbose     bool     `json:"verbose,omitempty"`
-	OutputPath  string   `json:"output_path,omitempty"`
-	Env         string   `json:"env,omitempty"`
+	Method  string   `json:"method"`
+	URL     string   `json:"url"`
+	Data    string   `json:"data,omitempty"`
+	Headers []string `json:"headers,omitempty"`
+	Timeout string   `json:"timeout,omitempty"`
+	// FollowRedirects is a pointer so a missing field in an older saved request
+	// defaults to "follow" rather than to the bool zero value (false).
+	FollowRedirects *bool  `json:"follow_redirects,omitempty"`
+	MaxRedirects    int    `json:"max_redirects,omitempty"`
+	NoColor         bool   `json:"no_color,omitempty"`
+	HeadersOnly     bool   `json:"headers_only,omitempty"`
+	BodyOnly        bool   `json:"body_only,omitempty"`
+	Raw             bool   `json:"raw,omitempty"`
+	Verbose         bool   `json:"verbose,omitempty"`
+	OutputPath      string `json:"output_path,omitempty"`
+	Env             string `json:"env,omitempty"`
 }
 
 func main() {
@@ -98,12 +120,14 @@ func runRequest(opts cliOptions) {
 	start := time.Now()
 
 	result, err := client.Fetch(client.Options{
-		Method:  opts.method,
-		URL:     opts.url,
-		Data:    []byte(opts.data),
-		Headers: opts.headers,
-		Timeout: opts.timeout,
-		Verbose: opts.verbose,
+		Method:          opts.method,
+		URL:             opts.url,
+		Data:            []byte(opts.data),
+		Headers:         opts.headers,
+		Timeout:         opts.timeout,
+		Verbose:         opts.verbose,
+		FollowRedirects: opts.followRedirects,
+		MaxRedirects:    opts.maxRedirects,
 	})
 	if err != nil {
 		fatal(err)
@@ -201,19 +225,22 @@ func saveRequestLocally(name string, opts cliOptions) error {
 		return fmt.Errorf("unable to create config directory: %w", err)
 	}
 
+	followRedirects := opts.followRedirects
 	req := savedRequest{
-		Method:      opts.method,
-		URL:         opts.url,
-		Data:        opts.data,
-		Headers:     opts.headers,
-		Timeout:     opts.timeout.String(),
-		NoColor:     opts.noColor,
-		HeadersOnly: opts.headersOnly,
-		BodyOnly:    opts.bodyOnly,
-		Raw:         opts.raw,
-		Verbose:     opts.verbose,
-		OutputPath:  opts.outputPath,
-		Env:         opts.env,
+		Method:          opts.method,
+		URL:             opts.url,
+		Data:            opts.data,
+		Headers:         opts.headers,
+		Timeout:         opts.timeout.String(),
+		FollowRedirects: &followRedirects,
+		MaxRedirects:    opts.maxRedirects,
+		NoColor:         opts.noColor,
+		HeadersOnly:     opts.headersOnly,
+		BodyOnly:        opts.bodyOnly,
+		Raw:             opts.raw,
+		Verbose:         opts.verbose,
+		OutputPath:      opts.outputPath,
+		Env:             opts.env,
 	}
 
 	data, err := json.MarshalIndent(req, "", "  ")
@@ -230,7 +257,7 @@ func saveRequestLocally(name string, opts cliOptions) error {
 }
 
 func loadRequestLocally(name string) (cliOptions, error) {
-	options := cliOptions{method: "GET", timeout: 30 * time.Second}
+	options := baseOptions()
 	if !isValidRequestName(name) {
 		return options, fmt.Errorf("invalid request name %q (only alphanumeric, hyphens, and underscores allowed)", name)
 	}
@@ -269,6 +296,14 @@ func loadRequestLocally(name string) (cliOptions, error) {
 	options.data = req.Data
 	options.headers = req.Headers
 	options.timeout = timeout
+	options.followRedirects = true
+	if req.FollowRedirects != nil {
+		options.followRedirects = *req.FollowRedirects
+	}
+	options.maxRedirects = defaultMaxRedirects
+	if req.MaxRedirects > 0 {
+		options.maxRedirects = req.MaxRedirects
+	}
 	options.noColor = req.NoColor
 	options.headersOnly = req.HeadersOnly
 	options.bodyOnly = req.BodyOnly
@@ -280,8 +315,17 @@ func loadRequestLocally(name string) (cliOptions, error) {
 	return options, nil
 }
 
+// parseMaxRedirects parses the --max-redirects value: a non-negative integer.
+func parseMaxRedirects(value string) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid max-redirects %q: want a non-negative integer", value)
+	}
+	return n, nil
+}
+
 func parseCLI(args []string) (cliOptions, error) {
-	return parseCLIWithBase(cliOptions{method: "GET", timeout: 30 * time.Second}, args)
+	return parseCLIWithBase(baseOptions(), args)
 }
 
 func parseCLIWithBase(base cliOptions, args []string) (cliOptions, error) {
@@ -342,6 +386,27 @@ func parseCLIWithBase(base cliOptions, args []string) (cliOptions, error) {
 				return options, fmt.Errorf("invalid timeout %q: %w", value, err)
 			}
 			options.timeout = duration
+		case arg == "--follow-redirects":
+			options.followRedirects = true
+		case arg == "--no-follow-redirects":
+			options.followRedirects = false
+		case arg == "--max-redirects":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			n, err := parseMaxRedirects(value)
+			if err != nil {
+				return options, err
+			}
+			options.maxRedirects = n
+			i = next
+		case strings.HasPrefix(arg, "--max-redirects="):
+			n, err := parseMaxRedirects(strings.SplitN(arg, "=", 2)[1])
+			if err != nil {
+				return options, err
+			}
+			options.maxRedirects = n
 		case arg == "--no-color":
 			options.noColor = true
 		case arg == "--headers-only":
@@ -465,6 +530,9 @@ func printUsage() {
 	fmt.Fprintln(os.Stdout, "  -d, --data        Request body")
 	fmt.Fprintln(os.Stdout, "  -H, --header      Add header (repeatable)")
 	fmt.Fprintln(os.Stdout, "  -t, --timeout     Timeout in seconds (default 30)")
+	fmt.Fprintln(os.Stdout, "  --follow-redirects    Follow 3xx redirects (default)")
+	fmt.Fprintln(os.Stdout, "  --no-follow-redirects Return the redirect response without following it")
+	fmt.Fprintln(os.Stdout, "  --max-redirects N     Max redirects to follow (default 10)")
 	fmt.Fprintln(os.Stdout, "  --no-color        Disable color output")
 	fmt.Fprintln(os.Stdout, "  --headers-only    Show only response headers")
 	fmt.Fprintln(os.Stdout, "  --body-only       Show only response body")
