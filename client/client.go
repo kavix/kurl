@@ -20,6 +20,13 @@ type Options struct {
 	Headers []string
 	Timeout time.Duration
 	Verbose bool
+	// FollowRedirects controls whether 3xx responses with a Location header
+	// are followed. When false, the first redirect response is returned as-is
+	// so the caller can inspect it.
+	FollowRedirects bool
+	// MaxRedirects is the maximum number of redirects to follow when
+	// FollowRedirects is true. Ignored when FollowRedirects is false.
+	MaxRedirects int
 }
 
 type RedirectHop struct {
@@ -153,7 +160,7 @@ func fetchSingleWithContext(ctx context.Context, opts Options, target string) (*
 	body := opts.Data
 	var redirects []RedirectHop
 
-	for attempt := 0; attempt < 10; attempt++ {
+	for {
 		req, err := http.NewRequestWithContext(ctx, method, requestURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -170,6 +177,15 @@ func fetchSingleWithContext(ctx context.Context, opts Options, target string) (*
 		}
 
 		if location := resp.Header.Get("Location"); isRedirect(resp.StatusCode) && location != "" {
+			// When not following, hand back the redirect response itself so the
+			// caller can inspect the 3xx status and Location.
+			if !opts.FollowRedirects {
+				return &Result{Request: req, Response: resp, Redirects: redirects}, nil
+			}
+			if len(redirects) >= opts.MaxRedirects {
+				resp.Body.Close()
+				return nil, fmt.Errorf("stopped after %d redirects (raise with --max-redirects, or use --no-follow-redirects)", opts.MaxRedirects)
+			}
 			redirects = append(redirects, RedirectHop{
 				Status:   resp.Status,
 				Method:   method,
@@ -191,8 +207,6 @@ func fetchSingleWithContext(ctx context.Context, opts Options, target string) (*
 
 		return &Result{Request: req, Response: resp, Redirects: redirects}, nil
 	}
-
-	return nil, fmt.Errorf("too many redirects")
 }
 
 func hasExplicitScheme(rawURL string) bool {
