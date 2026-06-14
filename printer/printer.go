@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -59,6 +60,9 @@ func Render(w io.Writer, result *client.Result, opts Options, elapsed time.Durat
 }
 
 func renderRaw(w io.Writer, result *client.Result, opts Options) error {
+	if opts.OutputPath != "" {
+		return saveBodyToFile(w, result.Response.Body, opts.OutputPath)
+	}
 	_, err := io.Copy(w, result.Response.Body)
 	return err
 }
@@ -150,52 +154,67 @@ func renderBodyOnly(w io.Writer, result *client.Result, opts Options) error {
 
 func renderBody(w io.Writer, result *client.Result, enabled bool, outputPath string) error {
 	contentType := result.Response.Header.Get("Content-Type")
-	writer := w
 	if outputPath != "" {
-		file, err := os.Create(outputPath)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-		writer = io.MultiWriter(w, file)
+		return saveBodyToFile(w, result.Response.Body, outputPath)
 	}
 
 	if isBinary(contentType) {
-		_, err := fmt.Fprintln(writer, "[Binary data - use -o to save]")
+		_, err := fmt.Fprintln(w, "[Binary data - use -o to save]")
 		return err
 	}
 
 	if isJSON(contentType, result.Response.ContentLength) {
-		written, err := PrettyJSON(writer, result.Response.Body, enabled)
+		written, err := PrettyJSON(w, result.Response.Body, enabled)
 		if err != nil {
 			return err
 		}
 		if written == 0 {
-			_, err = fmt.Fprintln(writer, "No body")
+			_, err = fmt.Fprintln(w, "No body")
 		}
 		return err
 	}
 
 	if isHTML(contentType) {
-		written, err := PrettyHTML(writer, result.Response.Body, enabled)
+		written, err := PrettyHTML(w, result.Response.Body, enabled)
 		if err != nil {
 			return err
 		}
 		if written == 0 {
-			_, err = fmt.Fprintln(writer, "No body")
+			_, err = fmt.Fprintln(w, "No body")
 		}
 		return err
 	}
 
-	written, err := io.Copy(writer, result.Response.Body)
+	written, err := io.Copy(w, result.Response.Body)
 	if err != nil {
 		return err
 	}
 	if written == 0 {
-		_, err = fmt.Fprintln(writer, "No body")
+		_, err = fmt.Fprintln(w, "No body")
 		return err
 	}
-	_, err = fmt.Fprintln(writer)
+	_, err = fmt.Fprintln(w)
+	return err
+}
+
+func saveBodyToFile(w io.Writer, body io.Reader, outputPath string) error {
+	if dir := filepath.Dir(outputPath); dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+
+	file, err := os.Create(outputPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if _, err := io.Copy(file, body); err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintf(w, "Saved response body to %s\n", outputPath)
 	return err
 }
 
