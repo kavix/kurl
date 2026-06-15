@@ -71,6 +71,24 @@ func TestParseCLITimeoutInvalid(t *testing.T) {
 	}
 }
 
+func TestParseCLITimingFlag(t *testing.T) {
+	opts, err := parseCLI([]string{"--timing", "https://example.com"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if !opts.timing {
+		t.Fatal("expected --timing to set the timing option")
+	}
+
+	opts, err = parseCLI([]string{"https://example.com"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if opts.timing {
+		t.Fatal("expected timing to default to false without --timing")
+	}
+}
+
 // Without an explicit --timeout, the default must remain 30s.
 func TestParseCLITimeoutDefault(t *testing.T) {
 	opts, err := parseCLI([]string{"https://example.com"})
