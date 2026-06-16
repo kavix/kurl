@@ -31,6 +31,7 @@ type cliOptions struct {
 	bodyOnly     bool
 	raw          bool
 	verbose      bool
+	timing       bool
 	outputPath   string
 	showHelp     bool
 	showVersion  bool
@@ -49,6 +50,7 @@ type savedRequest struct {
 	BodyOnly    bool     `json:"body_only,omitempty"`
 	Raw         bool     `json:"raw,omitempty"`
 	Verbose     bool     `json:"verbose,omitempty"`
+	Timing      bool     `json:"timing,omitempty"`
 	OutputPath  string   `json:"output_path,omitempty"`
 	Env         string   `json:"env,omitempty"`
 }
@@ -105,6 +107,7 @@ func runRequest(opts cliOptions) {
 		Headers: opts.headers,
 		Timeout: opts.timeout,
 		Verbose: opts.verbose,
+		Timing:  opts.timing,
 	})
 	if err != nil {
 		fatal(err)
@@ -123,6 +126,20 @@ func runRequest(opts cliOptions) {
 	if err := printer.Render(bw, result, printerOptions, time.Since(start)); err != nil {
 		bw.Flush()
 		fatal(err)
+	}
+
+	// The body is read during Render, so the total wall clock and the
+	// content-transfer phase are only known now.
+	if opts.timing && result.Timing != nil && !opts.raw {
+		total := time.Since(start)
+		contentTransfer := total - result.Timing.TimeToFirstByte
+		if contentTransfer < 0 {
+			contentTransfer = 0
+		}
+		if err := printer.RenderTiming(bw, result.Timing, contentTransfer, total, useColor); err != nil {
+			bw.Flush()
+			fatal(err)
+		}
 	}
 	bw.Flush()
 }
@@ -213,6 +230,7 @@ func saveRequestLocally(name string, opts cliOptions) error {
 		BodyOnly:    opts.bodyOnly,
 		Raw:         opts.raw,
 		Verbose:     opts.verbose,
+		Timing:      opts.timing,
 		OutputPath:  opts.outputPath,
 		Env:         opts.env,
 	}
@@ -275,6 +293,7 @@ func loadRequestLocally(name string) (cliOptions, error) {
 	options.bodyOnly = req.BodyOnly
 	options.raw = req.Raw
 	options.verbose = req.Verbose
+	options.timing = req.Timing
 	options.outputPath = req.OutputPath
 	options.env = req.Env
 
@@ -383,6 +402,8 @@ func parseCLIWithBase(base cliOptions, args []string) (cliOptions, error) {
 			options.raw = true
 		case arg == "-v" || arg == "--verbose":
 			options.verbose = true
+		case arg == "--timing":
+			options.timing = true
 		case arg == "-o" || arg == "--output":
 			value, next, err := takeValue(args, i)
 			if err != nil {
@@ -501,6 +522,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stdout, "  --body-only       Show only response body")
 	fmt.Fprintln(os.Stdout, "  --raw             Raw output, no formatting")
 	fmt.Fprintln(os.Stdout, "  -v, --verbose     Show request info too")
+	fmt.Fprintln(os.Stdout, "  --timing          Show per-phase timing (DNS, TCP, TLS, TTFB, transfer)")
 	fmt.Fprintln(os.Stdout, "  -o, --output      Save body to file")
 	fmt.Fprintln(os.Stdout, "  --install-alias   Install zsh/bash alias to prevent url globbing")
 }

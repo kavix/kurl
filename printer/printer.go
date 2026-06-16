@@ -236,6 +236,35 @@ func isHTML(contentType string) bool {
 	return strings.Contains(contentType, "text/html") || strings.Contains(contentType, "application/xhtml+xml")
 }
 
+// RenderTiming prints the per-phase request timing breakdown. The client
+// measures everything up to the first response byte; contentTransfer and total
+// are supplied by the caller, which owns the wall-clock window around the body
+// read.
+func RenderTiming(w io.Writer, t *client.Timing, contentTransfer, total time.Duration, enabled bool) error {
+	if _, err := fmt.Fprintln(w, sectionTitle(enabled, "TIMING")); err != nil {
+		return err
+	}
+	rows := []struct {
+		label string
+		value time.Duration
+	}{
+		{"DNS Lookup", t.DNSLookup},
+		{"TCP Connection", t.TCPConnection},
+		{"TLS Handshake", t.TLSHandshake},
+		{"Server Processing", t.ServerProcessing},
+		{"Content Transfer", contentTransfer},
+	}
+	for _, row := range rows {
+		if _, err := fmt.Fprintf(w, "  %-18s %s\n", color.Header(enabled, row.label), row.value.Round(time.Millisecond)); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(w, "  %-18s %s\n", color.Title(enabled, "Total"), total.Round(time.Millisecond)); err != nil {
+		return err
+	}
+	return nil
+}
+
 func sectionTitle(enabled bool, title string) string {
 	return color.Title(enabled, "── "+title+" ──────────────────────────────────────")
 }

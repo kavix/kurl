@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ type Options struct {
 	Headers []string
 	Timeout time.Duration
 	Verbose bool
+	Timing  bool
 }
 
 type RedirectHop struct {
@@ -33,6 +35,9 @@ type Result struct {
 	Request   *http.Request
 	Response  *http.Response
 	Redirects []RedirectHop
+	// Timing is populated only when Options.Timing is set. ContentTransfer and
+	// the overall total are filled in by the caller once the body is consumed.
+	Timing *Timing
 }
 
 func Fetch(opts Options) (*Result, error) {
@@ -153,6 +158,13 @@ func fetchSingleWithContext(ctx context.Context, opts Options, target string) (*
 	body := opts.Data
 	var redirects []RedirectHop
 
+	var timing *timingCollector
+	if opts.Timing {
+		timing = newTimingCollector()
+		ctx = withTiming(ctx, timing)
+		ctx = httptrace.WithClientTrace(ctx, timing.clientTrace())
+	}
+
 	for attempt := 0; attempt < 10; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, requestURL, bytes.NewReader(body))
 		if err != nil {
@@ -189,7 +201,11 @@ func fetchSingleWithContext(ctx context.Context, opts Options, target string) (*
 			continue
 		}
 
-		return &Result{Request: req, Response: resp, Redirects: redirects}, nil
+		result := &Result{Request: req, Response: resp, Redirects: redirects}
+		if timing != nil {
+			result.Timing = timing.result()
+		}
+		return result, nil
 	}
 
 	return nil, fmt.Errorf("too many redirects")
@@ -266,7 +282,16 @@ func tunedTransport() *http.Transport {
 				return nil, err
 			}
 
+			// DNS happens in our own concurrent resolver, which httptrace
+			// cannot see, so time it here for the --timing breakdown.
+			tc := timingFrom(ctx)
+			if tc != nil {
+				tc.markDNSStart()
+			}
 			ips, err := resolveHostConcurrent(ctx, host)
+			if tc != nil {
+				tc.markDNSDone()
+			}
 			if err != nil {
 				return dialer.DialContext(ctx, network, addr)
 			}
