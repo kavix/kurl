@@ -1,5 +1,7 @@
 # kurl
 
+<img width="2816" height="1536" alt="Gemini_Generated_Image_p38qe0p38qe0p38q" src="https://github.com/user-attachments/assets/79afaf1c-ddde-44bf-b545-c19a1adda095" />
+
 > A modern, concurrent HTTP client for the terminal — built in Go. Zero-config scheme probing, DNS racing, smart formatting, request replays, WebSockets, and environment profiles. All in one static binary.
 
 ```
