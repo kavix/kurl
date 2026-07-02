@@ -7,6 +7,16 @@ import (
 	"strings"
 )
 
+var globalDisable bool
+
+func Disable() {
+	globalDisable = true
+}
+
+func IsDisabled() bool {
+	return globalDisable || os.Getenv("NO_COLOR") != ""
+}
+
 const (
 	Reset   = "\033[0m"
 	Bold    = "\033[1m"
@@ -21,7 +31,7 @@ const (
 )
 
 func AutoEnabled(w io.Writer) bool {
-	if os.Getenv("NO_COLOR") != "" {
+	if IsDisabled() {
 		return false
 	}
 	file, ok := w.(*os.File)
@@ -36,7 +46,7 @@ func AutoEnabled(w io.Writer) bool {
 }
 
 func Wrap(enabled bool, code string, value string) string {
-	if !enabled {
+	if !enabled || IsDisabled() {
 		return value
 	}
 	return code + value + Reset

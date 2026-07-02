@@ -88,6 +88,9 @@ func main() {
 }
 
 func runRequest(opts cliOptions) {
+	if opts.noColor {
+		color.Disable()
+	}
 	if err := applyEnvironment(&opts); err != nil {
 		fatal(err)
 	}
@@ -394,6 +397,7 @@ func parseCLIWithBase(base cliOptions, args []string) (cliOptions, error) {
 			options.timeout = duration
 		case arg == "--no-color":
 			options.noColor = true
+			color.Disable()
 		case arg == "--headers-only":
 			options.headersOnly = true
 		case arg == "--body-only":
