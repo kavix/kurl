@@ -26,7 +26,7 @@ jobs:
       - name: Generate Auto Tag
         id: tagger
         run: |
-          DATE=$(date +'%Y.%m.%d-%H%M%S')
+          DATE=$(date +'%Y.%-m.%-d-%H%M%S')
           SHORT_SHA=$(git rev-parse --short HEAD)
           TAG_NAME="v0.1.0-auto.${DATE}-${SHORT_SHA}"
           echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
