@@ -21,22 +21,25 @@ var (
 )
 
 type cliOptions struct {
-	method       string
-	url          string
-	data         string
-	headers      []string
-	timeout      time.Duration
-	noColor      bool
-	headersOnly  bool
-	bodyOnly     bool
-	raw          bool
-	verbose      bool
-	timing       bool
-	outputPath   string
-	showHelp     bool
-	showVersion  bool
-	installAlias bool
-	env          string
+	method        string
+	url           string
+	data          string
+	headers       []string
+	timeout       time.Duration
+	noColor       bool
+	headersOnly   bool
+	bodyOnly      bool
+	raw           bool
+	verbose       bool
+	timing        bool
+	outputPath    string
+	showHelp      bool
+	showVersion   bool
+	installAlias  bool
+	env           string
+	filterQuery   string
+	filterKeys    string
+	filterFlatten bool
 }
 
 type savedRequest struct {
@@ -117,12 +120,15 @@ func runRequest(opts cliOptions) {
 	}
 
 	printerOptions := printer.Options{
-		Color:       useColor,
-		Raw:         opts.raw,
-		HeadersOnly: opts.headersOnly,
-		BodyOnly:    opts.bodyOnly,
-		Verbose:     opts.verbose,
-		OutputPath:  opts.outputPath,
+		Color:         useColor,
+		Raw:           opts.raw,
+		HeadersOnly:   opts.headersOnly,
+		BodyOnly:      opts.bodyOnly,
+		Verbose:       opts.verbose,
+		OutputPath:    opts.outputPath,
+		FilterQuery:   opts.filterQuery,
+		FilterKeys:    opts.filterKeys,
+		FilterFlatten: opts.filterFlatten,
 	}
 
 	bw := bufio.NewWriter(os.Stdout)
@@ -426,6 +432,26 @@ func parseCLIWithBase(base cliOptions, args []string) (cliOptions, error) {
 			i = next
 		case strings.HasPrefix(arg, "-e=") || strings.HasPrefix(arg, "--env="):
 			options.env = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--filter":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			options.filterQuery = value
+			i = next
+		case strings.HasPrefix(arg, "--filter="):
+			options.filterQuery = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--filter-keys":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			options.filterKeys = value
+			i = next
+		case strings.HasPrefix(arg, "--filter-keys="):
+			options.filterKeys = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--filter-flatten":
+			options.filterFlatten = true
 		case strings.HasPrefix(arg, "-"):
 			return options, fmt.Errorf("unknown flag %q", arg)
 		default:
