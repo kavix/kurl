@@ -55,3 +55,32 @@ func TestFlattenArray(t *testing.T) {
 		t.Errorf("expected %s, got %s", expected, string(out))
 	}
 }
+
+func TestApplyFilterEdgeCases(t *testing.T) {
+	input := []byte(`{"items":[10,20,30]}`)
+
+	// Empty query returns original JSON
+	out, err := ApplyFilter(input, "")
+	if err != nil || string(out) != string(input) {
+		t.Errorf("empty query failed")
+	}
+
+	// Dot query returns original JSON
+	out, err = ApplyFilter(input, ".")
+	if err != nil || string(out) != string(input) {
+		t.Errorf("dot query failed")
+	}
+
+	// Out of bounds index returns error
+	_, err = ApplyFilter(input, ".items[99]")
+	if err == nil {
+		t.Errorf("expected error for out of bounds index")
+	}
+
+	// Invalid JSON returns error
+	_, err = ApplyFilter([]byte(`invalid json`), ".name")
+	if err == nil {
+		t.Errorf("expected error for invalid JSON")
+	}
+}
+
