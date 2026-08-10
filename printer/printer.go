@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -10,15 +11,19 @@ import (
 
 	"brew-terminal-curl/client"
 	"brew-terminal-curl/color"
+	"brew-terminal-curl/internal/filter"
 )
 
 type Options struct {
-	Color       bool
-	Raw         bool
-	HeadersOnly bool
-	BodyOnly    bool
-	Verbose     bool
-	OutputPath  string
+	Color         bool
+	Raw           bool
+	HeadersOnly   bool
+	BodyOnly      bool
+	Verbose       bool
+	OutputPath    string
+	FilterQuery   string
+	FilterKeys    string
+	FilterFlatten bool
 }
 
 func Render(w io.Writer, result *client.Result, opts Options, elapsed time.Duration) error {
@@ -128,7 +133,7 @@ func renderHeadersAndBody(w io.Writer, result *client.Result, opts Options) erro
 	if _, err := fmt.Fprintln(w, sectionTitle(opts.Color, "BODY")); err != nil {
 		return err
 	}
-	return renderBody(w, result, opts.Color, opts.OutputPath)
+	return renderBody(w, result, opts)
 }
 
 func renderHeadersOnly(w io.Writer, result *client.Result, opts Options) error {
@@ -149,12 +154,15 @@ func renderBodyOnly(w io.Writer, result *client.Result, opts Options) error {
 	if _, err := fmt.Fprintln(w, sectionTitle(opts.Color, "BODY")); err != nil {
 		return err
 	}
-	return renderBody(w, result, opts.Color, opts.OutputPath)
+	return renderBody(w, result, opts)
 }
 
-func renderBody(w io.Writer, result *client.Result, enabled bool, outputPath string) error {
+func renderBody(w io.Writer, result *client.Result, opts Options) error {
 	contentType := result.Response.Header.Get("Content-Type")
-	if outputPath != "" {
+	enabled := opts.Color
+	outputPath := opts.OutputPath
+
+	if outputPath != "" && (opts.FilterQuery == "" && opts.FilterKeys == "" && !opts.FilterFlatten) {
 		return saveBodyToFile(w, result.Response.Body, outputPath)
 	}
 
@@ -164,7 +172,38 @@ func renderBody(w io.Writer, result *client.Result, enabled bool, outputPath str
 	}
 
 	if isJSON(contentType, result.Response.ContentLength) {
-		written, err := PrettyJSON(w, result.Response.Body, enabled)
+		var bodyReader io.Reader = result.Response.Body
+		if opts.FilterQuery != "" || opts.FilterKeys != "" || opts.FilterFlatten {
+			data, err := io.ReadAll(result.Response.Body)
+			if err != nil {
+				return err
+			}
+			if opts.FilterQuery != "" {
+				data, err = filter.ApplyFilter(data, opts.FilterQuery)
+				if err != nil {
+					return fmt.Errorf("filter error: %w", err)
+				}
+			}
+			if opts.FilterKeys != "" {
+				data, err = filter.FilterKeys(data, opts.FilterKeys)
+				if err != nil {
+					return fmt.Errorf("filter keys error: %w", err)
+				}
+			}
+			if opts.FilterFlatten {
+				data, err = filter.FlattenArray(data)
+				if err != nil {
+					return fmt.Errorf("flatten error: %w", err)
+				}
+			}
+			bodyReader = bytes.NewReader(data)
+		}
+
+		if outputPath != "" {
+			return saveBodyToFile(w, bodyReader, outputPath)
+		}
+
+		written, err := PrettyJSON(w, bodyReader, enabled)
 		if err != nil {
 			return err
 		}
