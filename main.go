@@ -11,6 +11,7 @@ import (
 
 	"brew-terminal-curl/client"
 	"brew-terminal-curl/color"
+	gql "brew-terminal-curl/internal/graphql"
 	"brew-terminal-curl/printer"
 )
 
@@ -66,6 +67,9 @@ func main() {
 			return
 		} else if cmd == "run" {
 			handleRunCommand(os.Args[2:])
+			return
+		} else if cmd == "graphql" {
+			handleGraphQLCommand(os.Args[2:])
 			return
 		}
 	}
@@ -203,6 +207,100 @@ func handleRunCommand(args []string) {
 	}
 
 	runRequest(opts)
+}
+
+func handleGraphQLCommand(args []string) {
+	if len(args) == 0 {
+		fatal(fmt.Errorf("error: graphql command requires a URL\nUsage: kurl graphql <URL> [--query '<query>'] [--variables '<json>'] [--introspect] [--generate-query <Type>]"))
+	}
+
+	targetURL := ""
+	query := ""
+	variables := ""
+	introspect := false
+	generateQuery := ""
+	var headers []string
+	verbose := false
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--query":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			query = val
+			i = next
+		case strings.HasPrefix(arg, "--query="):
+			query = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--variables":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			variables = val
+			i = next
+		case strings.HasPrefix(arg, "--variables="):
+			variables = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--introspect":
+			introspect = true
+		case arg == "--generate-query":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			generateQuery = val
+			i = next
+		case strings.HasPrefix(arg, "--generate-query="):
+			generateQuery = strings.SplitN(arg, "=", 2)[1]
+		case arg == "-H" || arg == "--header":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			headers = append(headers, val)
+			i = next
+		case strings.HasPrefix(arg, "-H=") || strings.HasPrefix(arg, "--header="):
+			headers = append(headers, strings.SplitN(arg, "=", 2)[1])
+		case arg == "-v" || arg == "--verbose":
+			verbose = true
+		case !strings.HasPrefix(arg, "-"):
+			if targetURL == "" {
+				targetURL = arg
+			}
+		}
+	}
+
+	if targetURL == "" {
+		fatal(fmt.Errorf("error: missing GraphQL endpoint URL"))
+	}
+
+	res, err := gql.ExecuteGraphQL(gql.Options{
+		URL:           targetURL,
+		Query:         query,
+		Variables:     variables,
+		Introspect:    introspect,
+		GenerateQuery: generateQuery,
+		Headers:       headers,
+		Verbose:       verbose,
+	})
+	if err != nil {
+		fatal(err)
+	}
+
+	useColor := color.AutoEnabled(os.Stdout)
+	start := time.Now()
+	printerOptions := printer.Options{
+		Color: useColor,
+	}
+
+	bw := bufio.NewWriter(os.Stdout)
+	if err := printer.Render(bw, res, printerOptions, time.Since(start)); err != nil {
+		bw.Flush()
+		fatal(err)
+	}
+	bw.Flush()
 }
 
 func isValidRequestName(name string) bool {
