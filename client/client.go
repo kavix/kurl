@@ -225,11 +225,11 @@ func resolveHostConcurrent(ctx context.Context, host string) ([]net.IP, error) {
 		err error
 	}
 
-	results := make(chan outcome, 2)
+	results := make(chan outcome, 3)
 	ctxCancel, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// 1. Resolve using public Cloudflare DNS 1.1.1.1
+	// 1. Resolve using public Cloudflare IPv4 DNS 1.1.1.1
 	go func() {
 		cfCtx, cfCancel := context.WithTimeout(ctxCancel, 800*time.Millisecond)
 		defer cfCancel()
@@ -245,14 +245,30 @@ func resolveHostConcurrent(ctx context.Context, host string) ([]net.IP, error) {
 		results <- outcome{ips: ips, err: err}
 	}()
 
-	// 2. Resolve using default System Resolver
+	// 2. Resolve using public Cloudflare IPv6 DNS [2606:4700:4700::1111]
+	go func() {
+		cfCtx, cfCancel := context.WithTimeout(ctxCancel, 800*time.Millisecond)
+		defer cfCancel()
+
+		resolver := &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{Timeout: 500 * time.Millisecond}
+				return d.DialContext(ctx, network, "[2606:4700:4700::1111]:53")
+			},
+		}
+		ips, err := resolver.LookupIP(cfCtx, "ip", host)
+		results <- outcome{ips: ips, err: err}
+	}()
+
+	// 3. Resolve using default System Resolver
 	go func() {
 		ips, err := net.DefaultResolver.LookupIP(ctxCancel, "ip", host)
 		results <- outcome{ips: ips, err: err}
 	}()
 
 	var lastErr error
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		select {
 		case out := <-results:
 			if out.err == nil && len(out.ips) > 0 {

@@ -4,10 +4,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"brew-terminal-curl/color"
 )
+
+var indentCache = func() [32][]byte {
+	var cache [32][]byte
+	for i := 0; i < 32; i++ {
+		cache[i] = []byte(strings.Repeat("  ", i))
+	}
+	return cache
+}()
+
+func getIndent(depth int) []byte {
+	if depth < 32 {
+		return indentCache[depth]
+	}
+	return []byte(strings.Repeat("  ", depth))
+}
 
 func PrettyJSON(w io.Writer, r io.Reader, enabled bool) (int64, error) {
 	dec := json.NewDecoder(r)
@@ -16,7 +32,7 @@ func PrettyJSON(w io.Writer, r io.Reader, enabled bool) (int64, error) {
 	if err := writeJSONValue(w, dec, enabled, 0, &count); err != nil {
 		return count, err
 	}
-	if _, err := fmt.Fprintln(w); err != nil {
+	if _, err := w.Write([]byte("\n")); err != nil {
 		return count, err
 	}
 	count++
@@ -36,26 +52,24 @@ func writeJSONToken(w io.Writer, dec *json.Decoder, tok json.Token, enabled bool
 	case json.Delim:
 		switch v {
 		case '{':
-			if _, err := fmt.Fprint(w, "{"); err != nil {
-				return err
-			}
-			if _, err := fmt.Fprint(w, "\n"); err != nil {
+			if _, err := w.Write([]byte("{\n")); err != nil {
 				return err
 			}
 			*count += 2
 			first := true
 			for dec.More() {
 				if !first {
-					if _, err := fmt.Fprint(w, ",\n"); err != nil {
+					if _, err := w.Write([]byte(",\n")); err != nil {
 						return err
 					}
 					*count += 2
 				}
 				first = false
-				if _, err := fmt.Fprint(w, strings.Repeat("  ", depth+1)); err != nil {
+				indent := getIndent(depth + 1)
+				if _, err := w.Write(indent); err != nil {
 					return err
 				}
-				*count += int64(len(strings.Repeat("  ", depth+1)))
+				*count += int64(len(indent))
 				keyTok, err := dec.Token()
 				if err != nil {
 					return err
@@ -64,7 +78,9 @@ func writeJSONToken(w io.Writer, dec *json.Decoder, tok json.Token, enabled bool
 				if !ok {
 					return fmt.Errorf("invalid json key")
 				}
-				if _, err := fmt.Fprintf(w, "%s: ", color.Key(enabled, fmt.Sprintf("\"%s\"", key))); err != nil {
+
+				keyFormatted := color.Key(enabled, `"`+key+`"`) + ": "
+				if _, err := io.WriteString(w, keyFormatted); err != nil {
 					return err
 				}
 				*count += int64(len(key))
@@ -75,31 +91,31 @@ func writeJSONToken(w io.Writer, dec *json.Decoder, tok json.Token, enabled bool
 			if _, err := dec.Token(); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprint(w, "\n"+strings.Repeat("  ", depth)+"}"); err != nil {
+			closeStr := "\n" + string(getIndent(depth)) + "}"
+			if _, err := io.WriteString(w, closeStr); err != nil {
 				return err
 			}
-			*count += int64(len(strings.Repeat("  ", depth))) + 1
+			*count += int64(len(closeStr))
 			return nil
 		case '[':
-			if _, err := fmt.Fprint(w, "["); err != nil {
-				return err
-			}
-			if _, err := fmt.Fprint(w, "\n"); err != nil {
+			if _, err := w.Write([]byte("[\n")); err != nil {
 				return err
 			}
 			*count += 2
 			first := true
 			for dec.More() {
 				if !first {
-					if _, err := fmt.Fprint(w, ",\n"); err != nil {
+					if _, err := w.Write([]byte(",\n")); err != nil {
 						return err
 					}
 					*count += 2
 				}
 				first = false
-				if _, err := fmt.Fprint(w, strings.Repeat("  ", depth+1)); err != nil {
+				indent := getIndent(depth + 1)
+				if _, err := w.Write(indent); err != nil {
 					return err
 				}
+				*count += int64(len(indent))
 				if err := writeJSONValue(w, dec, enabled, depth+1, count); err != nil {
 					return err
 				}
@@ -107,31 +123,38 @@ func writeJSONToken(w io.Writer, dec *json.Decoder, tok json.Token, enabled bool
 			if _, err := dec.Token(); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprint(w, "\n"+strings.Repeat("  ", depth)+"]"); err != nil {
+			closeStr := "\n" + string(getIndent(depth)) + "]"
+			if _, err := io.WriteString(w, closeStr); err != nil {
 				return err
 			}
+			*count += int64(len(closeStr))
 			return nil
 		default:
 			return fmt.Errorf("unexpected delimiter %q", v)
 		}
 	case string:
-		if _, err := fmt.Fprint(w, color.String(enabled, fmt.Sprintf("\"%s\"", v))); err != nil {
+		strFormatted := color.String(enabled, `"`+v+`"`)
+		if _, err := io.WriteString(w, strFormatted); err != nil {
 			return err
 		}
 	case json.Number:
-		if _, err := fmt.Fprint(w, color.Number(enabled, v.String())); err != nil {
+		numFormatted := color.Number(enabled, v.String())
+		if _, err := io.WriteString(w, numFormatted); err != nil {
 			return err
 		}
 	case bool:
-		if _, err := fmt.Fprint(w, color.Bool(enabled, fmt.Sprintf("%t", v))); err != nil {
+		boolStr := strconv.FormatBool(v)
+		boolFormatted := color.Bool(enabled, boolStr)
+		if _, err := io.WriteString(w, boolFormatted); err != nil {
 			return err
 		}
 	case nil:
-		if _, err := fmt.Fprint(w, color.Null(enabled, "null")); err != nil {
+		nullFormatted := color.Null(enabled, "null")
+		if _, err := io.WriteString(w, nullFormatted); err != nil {
 			return err
 		}
 	default:
-		if _, err := fmt.Fprint(w, fmt.Sprint(v)); err != nil {
+		if _, err := io.WriteString(w, fmt.Sprint(v)); err != nil {
 			return err
 		}
 	}

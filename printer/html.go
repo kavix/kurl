@@ -48,6 +48,9 @@ func (cw *countingWriter) Write(p []byte) (int, error) {
 }
 
 func format(cw *countingWriter, n *html.Node, depth int, enabled bool, hasHtml, hasBody, hasHead bool) error {
+	if depth < 0 {
+		depth = 0
+	}
 	switch n.Type {
 	case html.DocumentNode:
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
