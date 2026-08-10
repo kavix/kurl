@@ -1,70 +1,134 @@
 # Architecture & Technical Design
 
-This document details the core architectural features that make `kurl` fast, robust, and beautiful.
+This document details the software architecture, runtime flow, and concurrent sub-systems of `kurl`.
 
-## Concurrency-Powered Probing
+---
 
-When you pass a raw domain (e.g. `google.com`) without a scheme to `kurl`, it automatically initiates parallel HTTP probes. `kurl` will query both `https://` and `http://` concurrently. Whichever protocol responds successfully first is automatically resolved and served to the user. This guarantees the fastest possible resolution and gracefully handles environments that only support HTTP.
+## 1. High-Level Architecture Overview
 
-## Concurrent DNS Racing Resolver
+The diagram below illustrates the end-to-end processing pipeline of `kurl`, from CLI command parsing and profile resolution down to concurrent DNS racing, network transports, protocol sub-engines (HTTP, WebSockets, SSE, GraphQL), and smart output formatting.
 
-Standard DNS resolution relies on the host's system configuration, which can sometimes be bottlenecked by VPNs, ISP restrictions, or slow local resolvers.
-`kurl` bypasses these bottlenecks entirely using a **Multi-threaded DNS racing** approach. 
+```mermaid
+flowchart TD
+    subgraph CLI ["1. CLI & Environment Layer"]
+        Input["Terminal Input<br/><code>kurl [METHOD] [URL] [flags]</code>"] --> CLI_Parser["CLI Argument & Flag Parser<br/><code>main.go</code>"]
+        CLI_Parser --> Env_Loader["Environment Profile Engine<br/><code>env.go (~/.kurl/environments.json)</code>"]
+        CLI_Parser --> Request_Store["Request Replay Manager<br/><code>(~/.kurl/requests/*.json)</code>"]
+    end
 
-For every hostname lookup, `kurl` simultaneously dispatches queries to:
-1. The default system DNS resolver.
-2. A fast public resolver (like Cloudflare's `1.1.1.1`).
+    subgraph Router ["2. Sub-Protocol Router"]
+        Env_Loader --> Protocol_Switch{"Protocol / Command Dispatcher"}
+        Protocol_Switch -- "HTTP / HTTPS" --> HTTP_Engine["HTTP Fetch Engine<br/><code>client/client.go</code>"]
+        Protocol_Switch -- "ws:// / wss://" --> WS_Engine["WebSocket Duplex Loop<br/><code>websocket.go</code>"]
+        Protocol_Switch -- "sse" --> SSE_Engine["Server-Sent Events Streamer<br/><code>internal/sse</code>"]
+        Protocol_Switch -- "graphql" --> GQL_Engine["GraphQL Execution Engine<br/><code>internal/graphql</code>"]
+    end
 
-The query that completes first wins the race, and its IP result is used to dial the connection. This design completely eliminates DNS hang latencies and provides incredible resilience.
+    subgraph Network ["3. Concurrent Networking Core"]
+        HTTP_Engine --> DNS_Race["Triple-DNS Racing Resolver<br/>(1.1.1.1, [2606:4700:4700::1111], System)"]
+        HTTP_Engine --> Scheme_Race["Scheme Probing Engine<br/>(Parallel https:// vs http://)"]
+        DNS_Race --> Tuned_Transport["HTTP/2 & HTTP/1.1 Tuned Transport<br/>(Keep-Alive, TLS Handshake)"]
+        Scheme_Race --> Tuned_Transport
+    end
 
-## Token-by-Token JSON Formatter
+    subgraph Pipeline ["4. Rendering & Transformation Pipeline"]
+        Tuned_Transport --> Filter_Engine["JSON Transformation Engine<br/><code>internal/filter (--filter, --filter-keys)</code>"]
+        Filter_Engine --> Formatter{"Content-Type & TTY Auto-Detection"}
+        Formatter -- "application/json" --> JSON_Printer["Token-by-Token JSON Formatter<br/><code>printer/json.go</code>"]
+        Formatter -- "text/html" --> HTML_Printer["HTML5 DOM Pretty-Printer<br/><code>printer/html.go</code>"]
+        Formatter -- "Raw / Redirected" --> Raw_Printer["Plain Text / Binary Stream"]
+    end
 
-Traditional JSON formatting often loads the entire JSON document into a map/struct and re-encodes it. This can lose ordering and be relatively slow for huge payloads.
-Instead, `kurl` uses a strict **token-by-token parsing engine**. It parses JSON response bodies on the fly, rendering them directly to the terminal buffer with strict indentation and harmonized syntax-highlighting terminal colors.
+    subgraph Output ["5. Terminal & File Output"]
+        JSON_Printer --> Terminal["Colorized Stdout"]
+        HTML_Printer --> Terminal
+        Raw_Printer --> File_Save["File Output (-o / --output)"]
+    end
+```
 
-Color Map:
-*   **Braces/Brackets**: Gray/Dim
-*   **Keys**: Cyan
-*   **Strings**: Green
-*   **Numbers & Booleans**: Yellow
-*   **Nulls**: Bold Red
+---
 
-## Smart HTML Pretty-Printer
+## 2. Multi-Threaded Concurrent Resolver Architecture
 
-For raw HTML bodies, `kurl` uses a full HTML5 compliant DOM parser to process the structure. 
+`kurl` eliminates VPN and local DNS hang latencies by dispatching 3 concurrent resolution requests for every domain name. Whichever resolver returns a valid IP first cancels the remaining goroutine contexts and immediately proceeds to socket connection dialing.
 
-Key features include:
-*   **2-space Indentations**: Clean vertical structure.
-*   **Inline Element Collapsing**: Instead of placing every tag on a new line (which causes extreme vertical bloat), it intelligently collapses inline element nodes (`<b>`, `<i>`, `<a>`, `<span>`, `<strong>`, etc.) onto single lines with their text content.
-*   **Syntax Highlighting**: Colorizes tags, attributes, values, and comments.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client as kurl Client
+    participant Quad4 as Cloudflare IPv4 (1.1.1.1)
+    participant Quad6 as Cloudflare IPv6 ([2606:4700:4700::1111])
+    participant System as System Local Resolver
+    participant Dial as DialContext
 
-Color Map:
-*   **Tags & Bracket Closures**: Cyan & Dim Gray
-*   **Attributes Keys**: Yellow
-*   **Attribute Values**: Green
-*   **DOCTYPE Definitions**: Bold Magenta
-*   **HTML Comments**: Dim Gray / Italic
+    Client->>Quad4: LookupIP("api.example.com", 1.1.1.1:53)
+    Client->>Quad6: LookupIP("api.example.com", [2606:4700:4700::1111]:53)
+    Client->>System: LookupIP("api.example.com", DefaultResolver)
+    
+    note over Client,System: Concurrent Race (First Successful Result Wins)
+    Quad4-->>Client: Return IP [104.16.12.3] (Fastest - 4ms)
+    note right of Client: Cancel Quad6 & System Contexts
+    Client->>Dial: Establish TCP + TLS Connection to 104.16.12.3
+```
 
-## Smart TTY Output Switching
+---
 
-`kurl` respects the execution environment out-of-the-box. It automatically detects whether `stdout` is a terminal or if it is being redirected to a file, pipe, or script.
-If the output is redirected, `kurl` seamlessly and silently strips all ANSI escape codes (colors/bolding), ensuring that plain text output is perfectly clean. It also natively supports the standard `NO_COLOR` environment variable.
+## 3. Scheme Probing Engine Workflow
 
-## CDN & Anti-Bot Bypass
-Many modern APIs and web servers sit behind CDN firewalls (Cloudflare, Akamai, etc.) that reject requests lacking standard headers. `kurl` preemptively injects standard modern browser headers (`User-Agent` and `Accept`) to bypass these anti-bot blocking layers, resulting in higher success rates for CLI-based requests out of the box.
+When passed a bare domain (`kurl example.com`), `kurl` executes concurrent HTTP and HTTPS probes to eliminate scheme guessing latencies:
 
-## Request Replays & Serialization
-`kurl` stores profiles under `~/.kurl/requests/<name>.json` using a custom `savedRequest` schema.
-*   **Merger Parser**: Replaying configurations merges base configurations with CLI options dynamically. When parsing override arguments, the parser is seeded with the loaded configuration, allowing CLI values to replace or append to the loaded parameters.
-*   **Validation**: Sanitizes file path names to prevent directory traversal attacks (e.g. `save ../../bad`).
+```mermaid
+stateDiagram-v2
+    [*] --> ParseTarget
+    ParseTarget --> ExplicitScheme: Has http:// or https://
+    ParseTarget --> ProbeConcurrent: Bare Domain (e.g. api.org)
 
-## Interactive WebSocket Duplex Engine
-When routing connections to `ws://` or `wss://`, `kurl` bypasses standard HTTP fetching and launches an asynchronous duplex network loop:
-*   **Asynchronous Reader**: Spawns a background goroutine to read frames from the WebSocket stream, checking if message payloads are valid JSON to format them dynamically via the token-by-token highlighter.
-*   **Sender loop**: Uses the main thread to scan standard input and send text messages directly to the socket connection.
+    state ProbeConcurrent {
+        [*] --> SpawnHTTPS: Goroutine 1 (https://)
+        [*] --> SpawnHTTP: Goroutine 2 (http://)
+        SpawnHTTPS --> RaceBarrier
+        SpawnHTTP --> RaceBarrier
+    }
 
-## Environment Variable Profile Mapping
-Enabling `--env <profile>` loads configuration mappings from `~/.kurl/environments.json`.
-*   **Case-insensitive Header Merging**: Profile headers are merged with CLI overrides. If a header key passed on the CLI overrides a profile header, the profile header is replaced in-place, keeping ordering and avoiding duplicates.
-*   **Safe URL Joiner**: Safely concatenates environment base URLs with target relative paths, stripping duplicate slashes cleanly.
+    RaceBarrier --> WinnerSelected: First Successful 2xx/3xx/4xx Response
+    WinnerSelected --> CancelLoser: Cancel Loser Context
+    ExplicitScheme --> ExecuteSingle: Direct Connection
+    CancelLoser --> StreamResponse: Read & Pretty-Print Payload
+    ExecuteSingle --> StreamResponse
+    StreamResponse --> [*]
+```
+
+---
+
+## 4. Sub-System Details & Industrial Design Standards
+
+### A. Zero-Allocation Token-by-Token JSON Formatter
+Traditional JSON formatters unmarshal entire documents into memory maps or struct trees before pretty-printing, resulting in high memory churn and loss of original key ordering. `kurl` utilizes an **on-the-fly streaming token parser**:
+* **Allocation Caching**: Uses a pre-allocated depth indentation buffer array (`[32][]byte`) to eliminate string formatting allocations (`fmt.Sprintf`) per JSON key/val token.
+* **Color Harmony**: Highlighting tokens (`Cyan` keys, `Green` strings, `Yellow` numbers/booleans, `Bold Red` nulls) streamed directly via `io.WriteString`.
+
+### B. Smart HTML5 DOM Pretty-Printer
+* **Inline Node Collapsing**: Detects inline tags (`<b>`, `<i>`, `<a>`, `<span>`, etc.) and collapses them onto single lines to prevent vertical output bloat.
+* **Malformed HTML Guarding**: Maintains AST stack depth boundaries to safely format unclosed or legacy HTML tags without panic underflows.
+
+### C. JSON Path Transformation Engine (`internal/filter`)
+Provides jq-like filtering directly inside `kurl`:
+* **Path Slicing (`--filter`)**: Evaluates property paths (`.users[0].name`).
+* **CSV Projection (`--filter-keys`)**: Filters keys from objects or arrays (`name, email, role`).
+* **Array Flattening (`--filter-flatten`)**: Unnests multi-dimensional array payloads before formatting.
+
+### D. Server-Sent Events (SSE) Streaming Engine (`internal/sse`)
+* **W3C EventSource Standard**: Parses multiline `data:` buffers, `event:` classifications, `id:` tracking tags, and `retry:` interval durations.
+* **Real-time Colorized Terminal Output**: Live streams events with high-resolution timestamps (`15:04:05`) and optional event-type filtering (`--sse-filter`).
+
+### E. GraphQL Native Integration (`internal/graphql`)
+* **Payload Serialization**: Wraps queries and variable JSON payloads (`--variables`) into standard POST HTTP requests.
+* **Introspection & Code Generation**: Auto-generates template queries via `--generate-query <Type>` and executes full schema introspection (`--introspect`).
+
+---
+
+## 5. Security & TTY Environment Control
+
+* **Directory Traversal Protection**: Replay request profile names (`kurl save <name>`) are sanitized with strict alphanumeric, hyphen, and underscore validation rules (`isValidRequestName`).
+* **Smart TTY Detection**: Uses `os.ModeCharDevice` check on `stdout`. When redirected to files or pipes, ANSI color codes are stripped silently to ensure clean text output. Natively supports the `NO_COLOR` standard.
 
