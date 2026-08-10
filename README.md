@@ -1,66 +1,71 @@
-# kurl
+<div align="center">
 
-<img width="2816" height="1536" alt="Gemini_Generated_Image_p38qe0p38qe0p38q" src="https://github.com/user-attachments/assets/79afaf1c-ddde-44bf-b545-c19a1adda095" />
+# ⚡ kurl
 
-> A modern, concurrent HTTP client for the terminal — built in Go. Zero-config scheme probing, DNS racing, smart formatting, request replays, WebSockets, and environment profiles. All in one static binary.
+### A modern, concurrent HTTP/GraphQL/SSE client for the terminal — built in Go.
 
-```
-# Fetch any API — kurl auto-detects scheme, races DNS, and pretty-prints JSON
-kurl api.github.com/users/kavix
+[![Go Report Card](https://goreportcard.com/badge/github.com/kavix/kurl)](https://goreportcard.com/report/github.com/kavix/kurl)
+[![Build & Release Status](https://github.com/kavix/kurl/actions/workflows/auto-release.yml/badge.svg)](https://github.com/kavix/kurl/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Homebrew Formula](https://img.shields.io/badge/homebrew-kavix%2Ftap%2Fkurl-orange)](https://github.com/kavix/homebrew-tap)
+[![Go 1.22+](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go)](https://go.dev)
 
-# POST with headers and body
-kurl POST https://api.example.com/v1/users   -H "Content-Type: application/json"   -d '{"name": "Alice", "role": "admin"}'
+<p align="center">
+  <img width="850" alt="kurl Banner" src="https://github.com/user-attachments/assets/79afaf1c-ddde-44bf-b545-c19a1adda095" />
+</p>
 
-# Save a request profile and replay it
-kurl save github-api GET https://api.github.com/users/kavix -H "Accept: application/json"
-kurl run github-api -v
+*Zero-config scheme probing, concurrent triple-DNS racing, token-by-token syntax highlighting, built-in JSONPath filtering, native GraphQL, Server-Sent Events (SSE), request replays, and environment profiles. All packed into a single static binary with zero dependencies.*
 
-# Interactive WebSocket session
-kurl ws://echo.websocket.org
+[Quick Start](#-quick-start) • [Installation](#-installation) • [Feature Showcase](#-feature-showcase) • [Architecture](#-architecture) • [Documentation](#-documentation)
 
-# Switch environments on the fly
-kurl --env prod /users
-```
+</div>
 
-## What is kurl?
+---
 
-kurl is a command-line HTTP client that eliminates the friction of debugging APIs in the terminal. Unlike curl, which dumps raw, unformatted output, kurl renders responses with strict indentation, syntax highlighting, and structured headers — while adding modern features like concurrent DNS racing, automatic scheme probing, request replay profiles, and WebSocket support.
+## 🚀 Why kurl?
 
-It is designed for developers who want curl's universality without its steep learning curve, and HTTPie's beauty without its Python dependency.
+CLI HTTP clients have traditionally fallen into two extremes: **`curl`** (blazing fast & universal, but unformatted raw output with a steep CLI learning curve) and **`HTTPie`** (beautiful output, but heavy Python runtime dependency). 
 
-## Why kurl?
+**`kurl`** bridges this gap: giving you **`curl`'s static binary speed** paired with **`HTTPie`'s visual elegance**, while introducing modern features like **Triple-DNS racing**, **built-in JSONPath filtering**, **native GraphQL support**, **Server-Sent Events (SSE)**, and **environment profiles**.
 
-| Feature | curl | HTTPie | kurl |
-|---------|------|--------|------|
-| Single static binary | ✅ | ❌ (Python) | ✅ |
-| Auto scheme probing (http/https) | ❌ | ❌ | ✅ |
-| Concurrent DNS racing | ❌ | ❌ | ✅ |
-| Token-by-token JSON formatting | ❌ | ✅ | ✅ |
-| Smart HTML pretty-printing | ❌ | ❌ | ✅ |
-| Anti-bot header injection | ❌ | ❌ | ✅ |
-| Request save/replay profiles | ❌ | ❌ | ✅ |
-| Interactive WebSockets | ❌ | ❌ | ✅ |
-| Environment profiles (dev/staging/prod) | ❌ | ❌ | ✅ |
-| Zero runtime dependencies | ✅ | ❌ | ✅ |
+### 📊 Feature Comparison Matrix
 
-## Technical Highlights
+| Feature | `curl` | `HTTPie` | `kurl` |
+| :--- | :---: | :---: | :---: |
+| **Single Static Binary** | ✅ | ❌ *(Python Runtime)* | ✅ |
+| **Zero-Config Scheme Probing (`http` / `https`)** | ❌ | ❌ | ✅ *(Parallel Probing)* |
+| **Concurrent DNS Racing** | ❌ | ❌ | ✅ *(1.1.1.1 + IPv6 + System)* |
+| **Token-by-Token JSON Formatter** | ❌ | ✅ | ✅ *(Zero-Alloc Cache)* |
+| **Built-in JSONPath Filtering (`--filter`)** | ❌ *(Needs `jq`)* | ❌ *(Needs `jq`)* | ✅ *(Native Engine)* |
+| **Native GraphQL Client (`kurl graphql`)** | ❌ | ❌ | ✅ *(Query/Variables/Introspect)* |
+| **Server-Sent Events (SSE) Streamer (`kurl sse`)** | ❌ | ❌ | ✅ *(W3C EventSource)* |
+| **Smart HTML5 DOM Pretty-Printer** | ❌ | ❌ | ✅ *(Inline Tag Collapsing)* |
+| **Anti-Bot Header Auto-Injection** | ❌ | ❌ | ✅ *(Cloudflare/WAF Bypass)* |
+| **Request Save & Replay System** | ❌ | ❌ | ✅ *(Postman-like CLI Replays)* |
+| **Environment Profiles (`dev` / `staging` / `prod`)** | ❌ | ❌ | ✅ |
+| **Interactive WebSocket Client** | ❌ | ❌ | ✅ *(Duplex Terminal Socket)* |
 
-- **Concurrent DNS Racing**: Queries system DNS and Cloudflare's `1.1.1.1` in parallel to eliminate VPN-induced DNS hang latencies.
-- **Zero-Config Scheme Probing**: Pass a bare domain (`kurl example.com`) and kurl probes `https://` and `http://` concurrently, returning the fastest successful response.
-- **Token-by-Token JSON Formatter**: Parses JSON on the fly with strict indentation and harmonized syntax highlighting — no external `python -m json.tool` or `jq` required.
-- **HTML5 DOM Pretty-Printer**: Collapses inline element nodes to avoid line bloat while preserving structural clarity.
-- **Anti-Bot Bypass**: Automatically injects standard modern browser headers to prevent WAF and anti-bot layers from rejecting CLI requests.
-- **Request Replay System**: Save request configurations locally (like a terminal-native Postman) and replay them with optional parameter overrides.
-- **Interactive WebSocket Client**: Full-duplex text frame communication with real-time colorized message formatting.
-- **Environment Profiles**: Switch base URLs, auth headers, and defaults dynamically between dev, staging, and production via local configuration files.
+---
 
-## Installation
+## 📦 Installation
 
 ### macOS / Linux (Homebrew)
 
 ```bash
 brew tap kavix/tap
 brew install kurl
+```
+
+### Direct Download (Pre-compiled Binaries)
+
+Download the latest pre-compiled static binary for your OS and Architecture from the [Releases](https://github.com/kavix/kurl/releases) page:
+
+```bash
+# macOS (Apple Silicon / M1 / M2 / M3)
+curl -sSL https://github.com/kavix/kurl/releases/latest/download/kurl_darwin_arm64.tar.gz | tar -xz && sudo mv kurl /usr/local/bin/
+
+# Linux (x86_64)
+curl -sSL https://github.com/kavix/kurl/releases/latest/download/kurl_linux_amd64.tar.gz | tar -xz && sudo mv kurl /usr/local/bin/
 ```
 
 ### From Source (Go 1.22+)
@@ -71,39 +76,153 @@ cd kurl
 make install
 ```
 
-> Ensure `~/.local/bin` is in your `PATH`.
+---
 
-## Quick Start
+## ⚡ Quick Start
 
 ```bash
-# Fetch and format a JSON API
-kurl https://api.genderize.io/?name=luc
+# 1. Zero-config scheme probing & DNS racing (auto-resolves https://)
+kurl api.github.com/users/kavix
 
-# Fetch a webpage with automatic scheme probing and smart HTML rendering
-kurl news.lk
+# 2. Native JSONPath filtering without piping to jq!
+kurl https://api.github.com/users/kavix --filter .company
 
-# POST JSON payload with custom headers
-kurl POST https://api.example.com/v1/users   -H "Content-Type: application/json"   -H "Authorization: Bearer my-secret-token"   -d '{"name": "Alice", "role": "admin"}'
+# 3. CSV Key projection & object filtering
+kurl https://api.github.com/users/kavix --filter-keys "login, name, location, public_repos"
 
-# Save a request configuration locally
-kurl save github-api GET https://api.github.com/users/kavix -H "Accept: application/json"
+# 4. Native GraphQL queries with variables
+kurl graphql https://countries.trevorblades.com/ --query '{ country(code: "LK") { name capital currency emoji } }'
 
-# Replay the request with optional parameter overrides
-kurl run github-api -v
+# 5. Live Server-Sent Events (SSE) streaming with event filtering
+kurl sse https://api.example.com/events --sse-filter message
 
-# Open an interactive WebSocket session with colorized frames
-kurl ws://echo.websocket.org
+# 6. Save a request profile and replay it with overrides
+kurl save github-user GET https://api.github.com/users/kavix -H "Accept: application/json"
+kurl run github-user -v
 
-# Execute request under the 'prod' environment profile
-kurl --env prod /users
+# 7. Environment profiles (dev / staging / prod)
+kurl --env prod /users/search
 ```
 
-## Documentation
+---
 
-- [Usage Guide](docs/usage.md) — Command-line flags, output control, and troubleshooting
-- [Architecture](docs/architecture.md) — DNS racing, smart formatting, and design decisions
-- [Contributing](CONTRIBUTING.md) — Developer setup and pull request guidelines
+## ✨ Feature Showcase
 
-## License
+### 1. 🔍 Built-in JSONPath Filtering (`--filter`, `--filter-keys`, `--filter-flatten`)
+No need to pipe CLI responses into `jq`. Extract nested fields directly while preserving syntax highlighting:
+```bash
+# Extract single or nested fields
+kurl https://api.github.com/users/kavix --filter .name
 
-MIT License — see [LICENSE](LICENSE) for details.
+# Project specific keys from objects or arrays
+kurl https://api.github.com/users/kavix --filter-keys "name, bio, public_repos"
+
+# Flatten multi-dimensional array payloads
+kurl https://api.example.com/matrix --filter-flatten
+```
+
+### 2. 🔷 Native GraphQL Engine (`kurl graphql`)
+Crafting JSON payloads and escaping GraphQL string quotes manually is tedious. `kurl` provides a dedicated GraphQL sub-engine:
+```bash
+# Execute GraphQL query
+kurl graphql https://api.example.com/graphql --query '{ user(id: 1) { name email } }'
+
+# Execute with JSON variables
+kurl graphql https://api.example.com/graphql --query 'query GetUser($id: ID!) { user(id: $id) { name } }' --variables '{"id": "123"}'
+
+# Execute schema introspection
+kurl graphql https://api.example.com/graphql --introspect
+
+# Auto-generate GraphQL query template for a type
+kurl graphql https://api.example.com/graphql --generate-query User
+```
+
+### 3. 📡 Server-Sent Events (SSE) Streamer (`kurl sse`)
+Stream live event feeds (logs, AI completions, notifications) with real-time timestamps and event-type colorization:
+```bash
+# Stream all SSE events
+kurl sse https://api.example.com/stream
+
+# Stream and filter specific event types
+kurl sse https://api.example.com/stream --sse-filter update
+
+# Stream and record events to a log file
+kurl sse https://api.example.com/stream --sse-output sse_events.log
+```
+
+### 4. ⚡ Triple-DNS Racing Resolver
+Standard DNS resolvers can hang on VPNs or slow ISP servers. `kurl` simultaneously queries:
+1. **Cloudflare Public IPv4** (`1.1.1.1:53`)
+2. **Cloudflare Public IPv6** (`[2606:4700:4700::1111]:53`)
+3. **Local System Resolver** (`DefaultResolver`)
+
+The fastest response immediately wins and dials the socket, while loser contexts are cancelled.
+
+---
+
+## 🛠️ Configuration & Environment Profiles
+
+Create environment definitions in `~/.kurl/environments.json`:
+
+```json
+{
+  "dev": {
+    "base_url": "http://localhost:8080/v1",
+    "headers": [
+      "X-Environment: development",
+      "Authorization: Bearer dev-secret-token"
+    ]
+  },
+  "prod": {
+    "base_url": "https://api.production.com/v1",
+    "headers": [
+      "X-Environment: production",
+      "Authorization: Bearer prod-secret-token"
+    ]
+  }
+}
+```
+
+Switch base URLs and auth headers dynamically:
+```bash
+kurl --env dev /users/123
+kurl --env prod /users/123
+```
+
+---
+
+## 📐 Architecture & Performance
+
+For deep-dive documentation on `kurl`'s multi-threaded network model, zero-allocation token formatter, and state machine designs, see the **[Architecture & Technical Design Guide](docs/ARCHITECTURE.md)**.
+
+```mermaid
+flowchart LR
+    Input["kurl CLI Input"] --> Router{"Sub-Protocol Router"}
+    Router -- HTTP --> DNSRace["Triple DNS Race (IPv4 + IPv6 + System)"]
+    Router -- GraphQL --> GQL["GraphQL Engine"]
+    Router -- SSE --> SSEStream["SSE EventSource Streamer"]
+    DNSRace --> TunedTransport["Tuned HTTP/2 Transport"]
+    TunedTransport --> Filter["JSONPath Transformation Engine"]
+    Filter --> Printer["Token-by-Token Formatter"]
+    Printer --> Stdout["Colorized Terminal Stdout"]
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to open an issue or submit a pull request.
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'feat: add AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+Read our **[Contributing Guidelines](CONTRIBUTING.md)** for developer setup and testing workflows.
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See [`LICENSE`](LICENSE) for details.
