@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"brew-terminal-curl/client"
 	"brew-terminal-curl/color"
 	gql "brew-terminal-curl/internal/graphql"
+	"brew-terminal-curl/internal/sse"
 	"brew-terminal-curl/printer"
 )
 
@@ -70,6 +72,9 @@ func main() {
 			return
 		} else if cmd == "graphql" {
 			handleGraphQLCommand(os.Args[2:])
+			return
+		} else if cmd == "sse" {
+			handleSSECommand(os.Args[2:])
 			return
 		}
 	}
@@ -301,6 +306,73 @@ func handleGraphQLCommand(args []string) {
 		fatal(err)
 	}
 	bw.Flush()
+}
+
+func handleSSECommand(args []string) {
+	if len(args) == 0 {
+		fatal(fmt.Errorf("error: sse command requires a URL\nUsage: kurl sse <URL> [--sse-filter <event_type>] [--sse-output <filename>]"))
+	}
+
+	targetURL := ""
+	filterType := ""
+	outputFile := ""
+	var headers []string
+	noColor := false
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--sse-filter":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			filterType = val
+			i = next
+		case strings.HasPrefix(arg, "--sse-filter="):
+			filterType = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--sse-output":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			outputFile = val
+			i = next
+		case strings.HasPrefix(arg, "--sse-output="):
+			outputFile = strings.SplitN(arg, "=", 2)[1]
+		case arg == "-H" || arg == "--header":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			headers = append(headers, val)
+			i = next
+		case strings.HasPrefix(arg, "-H=") || strings.HasPrefix(arg, "--header="):
+			headers = append(headers, strings.SplitN(arg, "=", 2)[1])
+		case arg == "--no-color":
+			noColor = true
+		case !strings.HasPrefix(arg, "-"):
+			if targetURL == "" {
+				targetURL = arg
+			}
+		}
+	}
+
+	if targetURL == "" {
+		fatal(fmt.Errorf("error: missing SSE endpoint URL"))
+	}
+
+	ctx := context.Background()
+	err := sse.RunSSE(ctx, sse.Options{
+		URL:        targetURL,
+		Headers:    headers,
+		FilterType: filterType,
+		OutputFile: outputFile,
+		NoColor:    noColor,
+	})
+	if err != nil {
+		fatal(err)
+	}
 }
 
 func isValidRequestName(name string) bool {
