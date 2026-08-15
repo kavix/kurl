@@ -135,7 +135,7 @@ func fetchSingleWithContext(ctx context.Context, opts Options, target string) (*
 	transport := tunedTransport()
 	var rt http.RoundTripper = transport
 	if opts.HTTP3 {
-		rt = &http3.RoundTripper{}
+		rt = &http3.Transport{}
 	}
 	cli := &http.Client{
 		Transport: rt,

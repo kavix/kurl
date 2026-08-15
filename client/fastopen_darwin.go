@@ -10,13 +10,13 @@ import (
 )
 
 func dialerControl(network, address string, c syscall.RawConn) error {
-	var sockErr error
 	err := c.Control(func(fd uintptr) {
 		// TCP_FASTOPEN is available on macOS
-		sockErr = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_FASTOPEN, 1)
+		_ = unix.SetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_FASTOPEN, 1)
 	})
 	if err != nil {
-		return err
+		return nil
 	}
-	return sockErr
+	// Ignore errors so we fallback to standard TCP if TFO is not supported
+	return nil
 }
