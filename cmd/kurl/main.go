@@ -1,96 +1,766 @@
 package main
 
 import (
-	"flag"
+	"bufio"
+	"context"
+	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
-	"brew-terminal-curl/internal/response"
+	"brew-terminal-curl/client"
+	"brew-terminal-curl/color"
+	gql "brew-terminal-curl/internal/graphql"
+	"brew-terminal-curl/internal/sse"
+	"brew-terminal-curl/printer"
 )
 
-func main() {
-	inputPath := flag.String("in", "", "read a raw HTTP response from a file instead of stdin")
-	jsonOutput := flag.Bool("json", false, "render machine-readable JSON output")
-	colorOutput := flag.Bool("color", true, "enable ANSI color in terminal output")
-	method := flag.String("method", http.MethodGet, "HTTP method used when fetching a URL")
-	flag.Parse()
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
-	parsed, err := loadResponse(*inputPath, *method, flag.Args())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+type cliOptions struct {
+	method        string
+	url           string
+	data          string
+	headers       []string
+	timeout       time.Duration
+	noColor       bool
+	headersOnly   bool
+	bodyOnly      bool
+	raw           bool
+	verbose       bool
+	timing        bool
+	outputPath    string
+	showHelp      bool
+	showVersion   bool
+	installAlias  bool
+	env           string
+	filterQuery   string
+	filterKeys    string
+	filterFlatten bool
+	http3         bool
+}
+
+type savedRequest struct {
+	Method      string   `json:"method"`
+	URL         string   `json:"url"`
+	Data        string   `json:"data,omitempty"`
+	Headers     []string `json:"headers,omitempty"`
+	Timeout     string   `json:"timeout,omitempty"`
+	NoColor     bool     `json:"no_color,omitempty"`
+	HeadersOnly bool     `json:"headers_only,omitempty"`
+	BodyOnly    bool     `json:"body_only,omitempty"`
+	Raw         bool     `json:"raw,omitempty"`
+	Verbose     bool     `json:"verbose,omitempty"`
+	Timing      bool     `json:"timing,omitempty"`
+	OutputPath  string   `json:"output_path,omitempty"`
+	Env         string   `json:"env,omitempty"`
+}
+
+func main() {
+	if len(os.Args) > 1 {
+		cmd := os.Args[1]
+		if cmd == "save" {
+			handleSaveCommand(os.Args[2:])
+			return
+		} else if cmd == "run" {
+			handleRunCommand(os.Args[2:])
+			return
+		} else if cmd == "graphql" {
+			handleGraphQLCommand(os.Args[2:])
+			return
+		} else if cmd == "sse" {
+			handleSSECommand(os.Args[2:])
+			return
+		}
 	}
 
-	if *jsonOutput {
-		encoded, err := response.RenderJSON(parsed)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		fmt.Print(encoded)
+	opts, err := parseCLI(os.Args[1:])
+	if err != nil {
+		fatal(err)
+	}
+	if opts.showVersion {
+		fmt.Printf("kurl version %s (commit: %s, built at: %s)\n", version, commit, date)
+		return
+	}
+	if opts.showHelp {
+		printUsage()
+		return
+	}
+	if opts.installAlias {
+		installShellAlias()
 		return
 	}
 
-	fmt.Print(response.RenderText(parsed, *colorOutput))
+	runRequest(opts)
 }
 
-func loadResponse(inputPath string, method string, args []string) (response.Response, error) {
-	if inputPath != "" || len(args) == 0 {
-		data, err := readInput(inputPath)
-		if err != nil {
-			return response.Response{}, err
+func runRequest(opts cliOptions) {
+	if opts.noColor {
+		color.Disable()
+	}
+	if err := applyEnvironment(&opts); err != nil {
+		fatal(err)
+	}
+
+	if strings.HasPrefix(opts.url, "ws://") || strings.HasPrefix(opts.url, "wss://") {
+		runWebSocket(opts)
+		return
+	}
+
+	useColor := color.AutoEnabled(os.Stdout) && !opts.noColor
+	start := time.Now()
+
+	result, err := client.Fetch(client.Options{
+		Method:  opts.method,
+		URL:     opts.url,
+		Data:    []byte(opts.data),
+		Headers: opts.headers,
+		Timeout: opts.timeout,
+		Verbose: opts.verbose,
+		Timing:  opts.timing,
+		HTTP3:   opts.http3,
+	})
+	if err != nil {
+		fatal(err)
+	}
+
+	printerOptions := printer.Options{
+		Color:         useColor,
+		Raw:           opts.raw,
+		HeadersOnly:   opts.headersOnly,
+		BodyOnly:      opts.bodyOnly,
+		Verbose:       opts.verbose,
+		OutputPath:    opts.outputPath,
+		FilterQuery:   opts.filterQuery,
+		FilterKeys:    opts.filterKeys,
+		FilterFlatten: opts.filterFlatten,
+	}
+
+	bw := bufio.NewWriter(os.Stdout)
+	if err := printer.Render(bw, result, printerOptions, time.Since(start)); err != nil {
+		bw.Flush()
+		fatal(err)
+	}
+
+	// The body is read during Render, so the total wall clock and the
+	// content-transfer phase are only known now.
+	if opts.timing && result.Timing != nil && !opts.raw {
+		total := time.Since(start)
+		contentTransfer := total - result.Timing.TimeToFirstByte
+		if contentTransfer < 0 {
+			contentTransfer = 0
 		}
-
-		return response.Parse(string(data)), nil
+		if err := printer.RenderTiming(bw, result.Timing, contentTransfer, total, useColor); err != nil {
+			bw.Flush()
+			fatal(err)
+		}
 	}
-
-	if len(args) > 1 {
-		return response.Response{}, fmt.Errorf("expected a single URL argument")
-	}
-
-	parsedURL, err := url.ParseRequestURI(args[0])
-	if err != nil {
-		return response.Response{}, fmt.Errorf("invalid url %q: %w", args[0], err)
-	}
-
-	return fetchURL(parsedURL.String(), method)
+	bw.Flush()
 }
 
-func fetchURL(target string, method string) (response.Response, error) {
-	req, err := http.NewRequest(method, target, nil)
-	if err != nil {
-		return response.Response{}, err
+func handleSaveCommand(args []string) {
+	if len(args) == 0 {
+		fatal(fmt.Errorf("error: save command requires a request name\nUsage: kurl save <name> [METHOD] <URL> [flags]"))
+	}
+	name := args[0]
+	if !isValidRequestName(name) {
+		fatal(fmt.Errorf("error: invalid request name %q (only alphanumeric, hyphens, and underscores allowed)", name))
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return response.Response{}, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return response.Response{}, err
+	if len(args[1:]) == 0 {
+		fatal(fmt.Errorf("error: please provide the request details to save\nExample: kurl save %s GET https://api.github.com/users/kavix", name))
 	}
 
-	return response.FromHTTPResponse(resp.Status, resp.Header, body), nil
+	opts, err := parseCLI(args[1:])
+	if err != nil {
+		fatal(err)
+	}
+
+	if opts.url == "" {
+		fatal(fmt.Errorf("error: cannot save a request without a URL"))
+	}
+
+	err = saveRequestLocally(name, opts)
+	if err != nil {
+		fatal(err)
+	}
+
+	fmt.Printf("💾 Saved request %q locally.\n", name)
 }
 
-func readInput(path string) ([]byte, error) {
-	if path == "" {
-		return io.ReadAll(os.Stdin)
+func handleRunCommand(args []string) {
+	if len(args) == 0 {
+		fatal(fmt.Errorf("error: run command requires a request name\nUsage: kurl run <name> [overrides...]"))
 	}
+	name := args[0]
 
-	file, err := os.Open(path)
+	opts, err := loadRequestLocally(name)
 	if err != nil {
-		return nil, err
+		fatal(err)
 	}
-	defer file.Close()
 
-	return io.ReadAll(file)
+	// Apply optional command-line overrides
+	if len(args[1:]) > 0 {
+		opts, err = parseCLIWithBase(opts, args[1:])
+		if err != nil {
+			fatal(err)
+		}
+	}
+
+	runRequest(opts)
+}
+
+func handleGraphQLCommand(args []string) {
+	if len(args) == 0 {
+		fatal(fmt.Errorf("error: graphql command requires a URL\nUsage: kurl graphql <URL> [--query '<query>'] [--variables '<json>'] [--introspect] [--generate-query <Type>]"))
+	}
+
+	targetURL := ""
+	query := ""
+	variables := ""
+	introspect := false
+	generateQuery := ""
+	var headers []string
+	verbose := false
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--query":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			query = val
+			i = next
+		case strings.HasPrefix(arg, "--query="):
+			query = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--variables":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			variables = val
+			i = next
+		case strings.HasPrefix(arg, "--variables="):
+			variables = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--introspect":
+			introspect = true
+		case arg == "--generate-query":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			generateQuery = val
+			i = next
+		case strings.HasPrefix(arg, "--generate-query="):
+			generateQuery = strings.SplitN(arg, "=", 2)[1]
+		case arg == "-H" || arg == "--header":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			headers = append(headers, val)
+			i = next
+		case strings.HasPrefix(arg, "-H=") || strings.HasPrefix(arg, "--header="):
+			headers = append(headers, strings.SplitN(arg, "=", 2)[1])
+		case arg == "-v" || arg == "--verbose":
+			verbose = true
+		case !strings.HasPrefix(arg, "-"):
+			if targetURL == "" {
+				targetURL = arg
+			}
+		}
+	}
+
+	if targetURL == "" {
+		fatal(fmt.Errorf("error: missing GraphQL endpoint URL"))
+	}
+
+	res, err := gql.ExecuteGraphQL(gql.Options{
+		URL:           targetURL,
+		Query:         query,
+		Variables:     variables,
+		Introspect:    introspect,
+		GenerateQuery: generateQuery,
+		Headers:       headers,
+		Verbose:       verbose,
+	})
+	if err != nil {
+		fatal(err)
+	}
+
+	useColor := color.AutoEnabled(os.Stdout)
+	start := time.Now()
+	printerOptions := printer.Options{
+		Color: useColor,
+	}
+
+	bw := bufio.NewWriter(os.Stdout)
+	if err := printer.Render(bw, res, printerOptions, time.Since(start)); err != nil {
+		bw.Flush()
+		fatal(err)
+	}
+	bw.Flush()
+}
+
+func handleSSECommand(args []string) {
+	if len(args) == 0 {
+		fatal(fmt.Errorf("error: sse command requires a URL\nUsage: kurl sse <URL> [--sse-filter <event_type>] [--sse-output <filename>]"))
+	}
+
+	targetURL := ""
+	filterType := ""
+	outputFile := ""
+	var headers []string
+	noColor := false
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--sse-filter":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			filterType = val
+			i = next
+		case strings.HasPrefix(arg, "--sse-filter="):
+			filterType = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--sse-output":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			outputFile = val
+			i = next
+		case strings.HasPrefix(arg, "--sse-output="):
+			outputFile = strings.SplitN(arg, "=", 2)[1]
+		case arg == "-H" || arg == "--header":
+			val, next, err := takeValue(args, i)
+			if err != nil {
+				fatal(err)
+			}
+			headers = append(headers, val)
+			i = next
+		case strings.HasPrefix(arg, "-H=") || strings.HasPrefix(arg, "--header="):
+			headers = append(headers, strings.SplitN(arg, "=", 2)[1])
+		case arg == "--no-color":
+			noColor = true
+		case !strings.HasPrefix(arg, "-"):
+			if targetURL == "" {
+				targetURL = arg
+			}
+		}
+	}
+
+	if targetURL == "" {
+		fatal(fmt.Errorf("error: missing SSE endpoint URL"))
+	}
+
+	ctx := context.Background()
+	err := sse.RunSSE(ctx, sse.Options{
+		URL:        targetURL,
+		Headers:    headers,
+		FilterType: filterType,
+		OutputFile: outputFile,
+		NoColor:    noColor,
+	})
+	if err != nil {
+		fatal(err)
+	}
+}
+
+func isValidRequestName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func saveRequestLocally(name string, opts cliOptions) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("unable to find home directory: %w", err)
+	}
+
+	dir := home + "/.kurl/requests"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("unable to create config directory: %w", err)
+	}
+
+	req := savedRequest{
+		Method:      opts.method,
+		URL:         opts.url,
+		Data:        opts.data,
+		Headers:     opts.headers,
+		Timeout:     opts.timeout.String(),
+		NoColor:     opts.noColor,
+		HeadersOnly: opts.headersOnly,
+		BodyOnly:    opts.bodyOnly,
+		Raw:         opts.raw,
+		Verbose:     opts.verbose,
+		Timing:      opts.timing,
+		OutputPath:  opts.outputPath,
+		Env:         opts.env,
+	}
+
+	data, err := json.MarshalIndent(req, "", "  ")
+	if err != nil {
+		return fmt.Errorf("unable to serialize request: %w", err)
+	}
+
+	filePath := dir + "/" + name + ".json"
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return fmt.Errorf("unable to write request file: %w", err)
+	}
+
+	return nil
+}
+
+func loadRequestLocally(name string) (cliOptions, error) {
+	options := cliOptions{method: "GET", timeout: 30 * time.Second}
+	if !isValidRequestName(name) {
+		return options, fmt.Errorf("invalid request name %q (only alphanumeric, hyphens, and underscores allowed)", name)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return options, fmt.Errorf("unable to find home directory: %w", err)
+	}
+
+	filePath := home + "/.kurl/requests/" + name + ".json"
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return options, fmt.Errorf("request %q not found. Save it first using 'kurl save %s <args>'", name, name)
+		}
+		return options, fmt.Errorf("unable to read request file: %w", err)
+	}
+
+	var req savedRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return options, fmt.Errorf("unable to parse request file: %w", err)
+	}
+
+	var timeout time.Duration
+	if req.Timeout != "" {
+		timeout, err = time.ParseDuration(req.Timeout)
+		if err != nil {
+			timeout = 30 * time.Second
+		}
+	} else {
+		timeout = 30 * time.Second
+	}
+
+	options.method = req.Method
+	options.url = req.URL
+	options.data = req.Data
+	options.headers = req.Headers
+	options.timeout = timeout
+	options.noColor = req.NoColor
+	options.headersOnly = req.HeadersOnly
+	options.bodyOnly = req.BodyOnly
+	options.raw = req.Raw
+	options.verbose = req.Verbose
+	options.timing = req.Timing
+	options.outputPath = req.OutputPath
+	options.env = req.Env
+
+	return options, nil
+}
+
+// parseTimeout interprets the value passed to --timeout/-t.
+//
+// A bare number (e.g. "30" or "0.5") is treated as seconds, matching the
+// documented "--timeout <seconds>" default. Any other value is parsed as a Go
+// duration string, so "5s", "1m", "500ms" and "1m30s" all work as the user
+// would expect. (The previous behaviour appended "s" unconditionally, which
+// turned "1m" into "1ms" and rejected "500ms" outright.)
+func parseTimeout(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, fmt.Errorf("invalid timeout %q: empty value", value)
+	}
+
+	if seconds, err := strconv.ParseFloat(value, 64); err == nil {
+		if seconds < 0 {
+			return 0, fmt.Errorf("invalid timeout %q: must not be negative", value)
+		}
+		return time.Duration(seconds * float64(time.Second)), nil
+	}
+
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid timeout %q: want a number of seconds or a duration like 5s, 1m, 500ms", value)
+	}
+	if duration < 0 {
+		return 0, fmt.Errorf("invalid timeout %q: must not be negative", value)
+	}
+	return duration, nil
+}
+
+func parseCLI(args []string) (cliOptions, error) {
+	return parseCLIWithBase(cliOptions{method: "GET", timeout: 30 * time.Second}, args)
+}
+
+func parseCLIWithBase(base cliOptions, args []string) (cliOptions, error) {
+	options := base
+	var positional []string
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "-h" || arg == "--help":
+			options.showHelp = true
+		case arg == "--install-alias":
+			options.installAlias = true
+		case arg == "--version" || arg == "-V":
+			options.showVersion = true
+		case arg == "-X" || arg == "--method":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			options.method = strings.ToUpper(value)
+			i = next
+		case strings.HasPrefix(arg, "-X=") || strings.HasPrefix(arg, "--method="):
+			options.method = strings.ToUpper(strings.SplitN(arg, "=", 2)[1])
+		case arg == "-d" || arg == "--data":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			options.data = value
+			i = next
+		case strings.HasPrefix(arg, "-d=") || strings.HasPrefix(arg, "--data="):
+			options.data = strings.SplitN(arg, "=", 2)[1]
+		case arg == "-H" || arg == "--header":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			options.headers = append(options.headers, value)
+			i = next
+		case strings.HasPrefix(arg, "-H=") || strings.HasPrefix(arg, "--header="):
+			options.headers = append(options.headers, strings.SplitN(arg, "=", 2)[1])
+		case arg == "-t" || arg == "--timeout":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			duration, err := parseTimeout(value)
+			if err != nil {
+				return options, err
+			}
+			options.timeout = duration
+			i = next
+		case strings.HasPrefix(arg, "-t=") || strings.HasPrefix(arg, "--timeout="):
+			value := strings.SplitN(arg, "=", 2)[1]
+			duration, err := parseTimeout(value)
+			if err != nil {
+				return options, err
+			}
+			options.timeout = duration
+		case arg == "--no-color":
+			options.noColor = true
+			color.Disable()
+		case arg == "--headers-only":
+			options.headersOnly = true
+		case arg == "--body-only":
+			options.bodyOnly = true
+		case arg == "--raw":
+			options.raw = true
+		case arg == "-v" || arg == "--verbose":
+			options.verbose = true
+		case arg == "--timing":
+			options.timing = true
+		case arg == "-o" || arg == "--output":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			options.outputPath = value
+			i = next
+		case strings.HasPrefix(arg, "-o=") || strings.HasPrefix(arg, "--output="):
+			options.outputPath = strings.SplitN(arg, "=", 2)[1]
+		case arg == "-e" || arg == "--env":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			options.env = value
+			i = next
+		case strings.HasPrefix(arg, "-e=") || strings.HasPrefix(arg, "--env="):
+			options.env = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--filter":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			options.filterQuery = value
+			i = next
+		case strings.HasPrefix(arg, "--filter="):
+			options.filterQuery = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--filter-keys":
+			value, next, err := takeValue(args, i)
+			if err != nil {
+				return options, err
+			}
+			options.filterKeys = value
+			i = next
+		case strings.HasPrefix(arg, "--filter-keys="):
+			options.filterKeys = strings.SplitN(arg, "=", 2)[1]
+		case arg == "--filter-flatten":
+			options.filterFlatten = true
+		case arg == "--http3":
+			options.http3 = true
+		case strings.HasPrefix(arg, "-"):
+			return options, fmt.Errorf("unknown flag %q", arg)
+		default:
+			positional = append(positional, arg)
+		}
+	}
+
+	if options.showHelp {
+		return options, nil
+	}
+
+	if len(positional) > 0 {
+		method, urlValue, err := resolveTarget(positional)
+		if err != nil {
+			return options, err
+		}
+		if len(positional) == 2 {
+			options.method = method
+		} else if options.method == "" || options.method == "GET" {
+			options.method = method
+		}
+		options.url = urlValue
+	}
+
+	if options.headersOnly && options.bodyOnly {
+		return options, fmt.Errorf("--headers-only and --body-only cannot be used together")
+	}
+
+	return options, nil
+}
+
+func resolveTarget(positional []string) (string, string, error) {
+	if len(positional) == 0 {
+		return "", "", nil
+	}
+	if len(positional) == 1 {
+		return "GET", positional[0], nil
+	}
+	if len(positional) > 2 {
+		return "", "", fmt.Errorf("expected at most METHOD and URL")
+	}
+
+	if isMethodToken(positional[0]) {
+		return strings.ToUpper(positional[0]), positional[1], nil
+	}
+
+	return "", "", fmt.Errorf("expected a METHOD and URL, or just a URL")
+}
+
+func looksLikeURL(value string) bool {
+	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
+}
+
+func isMethodToken(value string) bool {
+	if value == "" {
+		return false
+	}
+	if strings.ContainsAny(value, "/.:?&=") {
+		return false
+	}
+	return value == strings.ToUpper(value)
+}
+
+func takeValue(args []string, index int) (string, int, error) {
+	if strings.Contains(args[index], "=") {
+		return strings.SplitN(args[index], "=", 2)[1], index, nil
+	}
+	if index+1 >= len(args) {
+		return "", index, fmt.Errorf("missing value for %q", args[index])
+	}
+	return args[index+1], index + 1, nil
+}
+
+func fatal(err error) {
+	if err == nil {
+		return
+	}
+	colored := color.ErrorText(color.AutoEnabled(os.Stderr), err.Error())
+	fmt.Fprintln(os.Stderr, colored)
+	os.Exit(1)
+}
+
+func printUsage() {
+	fmt.Fprintln(os.Stdout, "kurl [COMMAND] [args...] / kurl [METHOD] <URL> [flags]")
+	fmt.Fprintln(os.Stdout, "")
+	fmt.Fprintln(os.Stdout, "Commands:")
+	fmt.Fprintln(os.Stdout, "  save <name> [args...] Save a request configuration locally")
+	fmt.Fprintln(os.Stdout, "  run <name> [overrides...] Replay a saved request configuration")
+	fmt.Fprintln(os.Stdout, "")
+	fmt.Fprintln(os.Stdout, "Flags:")
+	fmt.Fprintln(os.Stdout, "  -e, --env         Environment profile name (dev/prod/etc.)")
+	fmt.Fprintln(os.Stdout, "  -X, --method      HTTP method (default GET)")
+	fmt.Fprintln(os.Stdout, "  -d, --data        Request body")
+	fmt.Fprintln(os.Stdout, "  -H, --header      Add header (repeatable)")
+	fmt.Fprintln(os.Stdout, "  -t, --timeout     Timeout: seconds or duration (30, 5s, 1m, 500ms; default 30s)")
+	fmt.Fprintln(os.Stdout, "  --no-color        Disable color output")
+	fmt.Fprintln(os.Stdout, "  --headers-only    Show only response headers")
+	fmt.Fprintln(os.Stdout, "  --body-only       Show only response body")
+	fmt.Fprintln(os.Stdout, "  --raw             Raw output, no formatting")
+	fmt.Fprintln(os.Stdout, "  -v, --verbose     Show request info too")
+	fmt.Fprintln(os.Stdout, "  --timing          Show per-phase timing (DNS, TCP, TLS, TTFB, transfer)")
+	fmt.Fprintln(os.Stdout, "  --http3           Attempt HTTP/3 (QUIC) connection for 0-RTT handshakes")
+	fmt.Fprintln(os.Stdout, "  -o, --output      Save body to file")
+	fmt.Fprintln(os.Stdout, "  --install-alias   Install zsh/bash alias to prevent url globbing")
+}
+
+func installShellAlias() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fatal(err)
+	}
+
+	zshrcPath := home + "/.zshrc"
+	aliasLine := `alias kurl="noglob kurl"`
+
+	content, err := os.ReadFile(zshrcPath)
+	if err != nil && !os.IsNotExist(err) {
+		fatal(err)
+	}
+
+	if strings.Contains(string(content), aliasLine) {
+		fmt.Println("Alias already exists in " + zshrcPath)
+		return
+	}
+
+	f, err := os.OpenFile(zshrcPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		fatal(err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString("\n# Prevent zsh from breaking on URLs with ? and &\n" + aliasLine + "\n"); err != nil {
+		fatal(err)
+	}
+
+	fmt.Println("✅ Successfully added 'noglob' alias to " + zshrcPath)
+	fmt.Println("Please run 'source ~/.zshrc' or restart your terminal to apply the changes.")
 }

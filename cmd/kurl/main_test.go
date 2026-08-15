@@ -1,33 +1,101 @@
 package main
 
 import (
-	"net/http"
-	"strings"
 	"testing"
-
-	"brew-terminal-curl/internal/response"
+	"time"
 )
 
-func TestFormatBodyPrettyPrintsJSON(t *testing.T) {
-	body := []byte(`{"name":"kurl","nested":{"ok":true}}`)
+func TestParseTimeout(t *testing.T) {
+	cases := []struct {
+		in   string
+		want time.Duration
+	}{
+		{"30", 30 * time.Second}, // bare number -> seconds (documented default)
+		{"0", 0},                 // zero disables the timeout
+		{"0.5", 500 * time.Millisecond},
+		{"5s", 5 * time.Second},
+		{"1m", time.Minute}, // regression: previously became 1ms
+		{"500ms", 500 * time.Millisecond},
+		{"1m30s", 90 * time.Second},
+		{" 2s ", 2 * time.Second}, // surrounding whitespace tolerated
+	}
 
-	rendered := response.FormatBody(body, "application/json")
-
-	if !strings.Contains(rendered, "\n  \"nested\"") {
-		t.Fatalf("expected pretty printed json, got: %s", rendered)
+	for _, c := range cases {
+		got, err := parseTimeout(c.in)
+		if err != nil {
+			t.Errorf("parseTimeout(%q) returned error: %v", c.in, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("parseTimeout(%q) = %v, want %v", c.in, got, c.want)
+		}
 	}
 }
 
-func TestFromHTTPResponseKeepsStatus(t *testing.T) {
-	headers := http.Header{}
-	headers.Set("Content-Type", "application/json")
-
-	parsed := response.FromHTTPResponse("HTTP/2 200", headers, []byte(`{"ok":true}`))
-
-	if parsed.StatusLine != "HTTP/2 200" {
-		t.Fatalf("unexpected status line: %q", parsed.StatusLine)
+func TestParseTimeoutInvalid(t *testing.T) {
+	for _, in := range []string{"", "notaduration", "-5", "-1s", "5x"} {
+		if _, err := parseTimeout(in); err == nil {
+			t.Errorf("parseTimeout(%q) expected an error, got nil", in)
+		}
 	}
-	if !strings.Contains(parsed.Body, "\n  \"ok\"") {
-		t.Fatalf("expected pretty json body, got: %s", parsed.Body)
+}
+
+// The flag must actually reach cliOptions.timeout, for both the "--timeout v"
+// and "--timeout=v" / "-t=v" spellings.
+func TestParseCLITimeoutFlag(t *testing.T) {
+	cases := []struct {
+		args []string
+		want time.Duration
+	}{
+		{[]string{"--timeout", "1m", "https://example.com"}, time.Minute},
+		{[]string{"-t", "750ms", "https://example.com"}, 750 * time.Millisecond},
+		{[]string{"--timeout=2s", "https://example.com"}, 2 * time.Second},
+		{[]string{"-t=15", "https://example.com"}, 15 * time.Second},
+	}
+
+	for _, c := range cases {
+		opts, err := parseCLI(c.args)
+		if err != nil {
+			t.Errorf("parseCLI(%v) returned error: %v", c.args, err)
+			continue
+		}
+		if opts.timeout != c.want {
+			t.Errorf("parseCLI(%v) timeout = %v, want %v", c.args, opts.timeout, c.want)
+		}
+	}
+}
+
+func TestParseCLITimeoutInvalid(t *testing.T) {
+	if _, err := parseCLI([]string{"--timeout", "notaduration", "https://example.com"}); err == nil {
+		t.Fatal("expected parseCLI to reject an invalid --timeout value")
+	}
+}
+
+func TestParseCLITimingFlag(t *testing.T) {
+	opts, err := parseCLI([]string{"--timing", "https://example.com"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if !opts.timing {
+		t.Fatal("expected --timing to set the timing option")
+	}
+
+	opts, err = parseCLI([]string{"https://example.com"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if opts.timing {
+		t.Fatal("expected timing to default to false without --timing")
+	}
+}
+
+// Without an explicit --timeout, the default must remain 30s.
+func TestParseCLITimeoutDefault(t *testing.T) {
+	opts, err := parseCLI([]string{"https://example.com"})
+	if err != nil {
+		t.Fatalf("parseCLI returned error: %v", err)
+	}
+	if opts.timeout != 30*time.Second {
+		t.Fatalf("default timeout = %v, want 30s", opts.timeout)
 	}
 }

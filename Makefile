@@ -1,4 +1,4 @@
-APP := .
+APP := ./cmd/kurl
 INSTALL_BIN_DIR ?= $(HOME)/.local/bin
 
 .PHONY: run test build install release-local clean fmt lint

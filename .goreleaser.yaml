@@ -9,7 +9,8 @@ before:
     - go test ./...
 
 builds:
-  - env:
+  - main: ./cmd/kurl
+    env:
       - CGO_ENABLED=0
     goos:
       - darwin
