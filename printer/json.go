@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"brew-terminal-curl/color"
+	"github.com/kavix/kurl/color"
 )
 
 var indentCache = func() [32][]byte {

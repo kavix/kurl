@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
-	"brew-terminal-curl/client"
-	"brew-terminal-curl/printer"
+	"github.com/kavix/kurl/client"
+	"github.com/kavix/kurl/printer"
 )
 
 func main() {

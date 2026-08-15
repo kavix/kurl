@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"brew-terminal-curl/client"
+	"github.com/kavix/kurl/client"
 )
 
 func TestOutputPathSavesRawBodyOnly(t *testing.T) {

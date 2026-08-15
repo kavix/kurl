@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"brew-terminal-curl/internal/response"
+	"github.com/kavix/kurl/internal/response"
 )
 
 func main() {

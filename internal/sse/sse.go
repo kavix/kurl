@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"brew-terminal-curl/color"
+	"github.com/kavix/kurl/color"
 )
 
 type Event struct {

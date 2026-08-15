@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 
-	"brew-terminal-curl/client"
+	"github.com/kavix/kurl/client"
 )
 
 type Options struct {

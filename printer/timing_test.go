@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"brew-terminal-curl/client"
+	"github.com/kavix/kurl/client"
 )
 
 func TestRenderTiming(t *testing.T) {

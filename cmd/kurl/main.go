@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"brew-terminal-curl/client"
-	"brew-terminal-curl/color"
-	gql "brew-terminal-curl/internal/graphql"
-	"brew-terminal-curl/internal/sse"
-	"brew-terminal-curl/printer"
+	"github.com/kavix/kurl/client"
+	"github.com/kavix/kurl/color"
+	gql "github.com/kavix/kurl/internal/graphql"
+	"github.com/kavix/kurl/internal/sse"
+	"github.com/kavix/kurl/printer"
 )
 
 var (

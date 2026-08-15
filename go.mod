@@ -1,4 +1,4 @@
-module brew-terminal-curl
+module github.com/kavix/kurl
 
 go 1.25.0
 

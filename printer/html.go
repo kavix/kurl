@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"brew-terminal-curl/color"
+	"github.com/kavix/kurl/color"
 
 	"golang.org/x/net/html"
 )

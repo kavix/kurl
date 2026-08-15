@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"brew-terminal-curl/client"
-	"brew-terminal-curl/color"
-	"brew-terminal-curl/internal/filter"
+	"github.com/kavix/kurl/client"
+	"github.com/kavix/kurl/color"
+	"github.com/kavix/kurl/internal/filter"
 )
 
 type Options struct {
