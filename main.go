@@ -43,6 +43,7 @@ type cliOptions struct {
 	filterQuery   string
 	filterKeys    string
 	filterFlatten bool
+	http3         bool
 }
 
 type savedRequest struct {
@@ -123,6 +124,7 @@ func runRequest(opts cliOptions) {
 		Timeout: opts.timeout,
 		Verbose: opts.verbose,
 		Timing:  opts.timing,
+		HTTP3:   opts.http3,
 	})
 	if err != nil {
 		fatal(err)
@@ -622,6 +624,8 @@ func parseCLIWithBase(base cliOptions, args []string) (cliOptions, error) {
 			options.filterKeys = strings.SplitN(arg, "=", 2)[1]
 		case arg == "--filter-flatten":
 			options.filterFlatten = true
+		case arg == "--http3":
+			options.http3 = true
 		case strings.HasPrefix(arg, "-"):
 			return options, fmt.Errorf("unknown flag %q", arg)
 		default:
@@ -723,6 +727,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stdout, "  --raw             Raw output, no formatting")
 	fmt.Fprintln(os.Stdout, "  -v, --verbose     Show request info too")
 	fmt.Fprintln(os.Stdout, "  --timing          Show per-phase timing (DNS, TCP, TLS, TTFB, transfer)")
+	fmt.Fprintln(os.Stdout, "  --http3           Attempt HTTP/3 (QUIC) connection for 0-RTT handshakes")
 	fmt.Fprintln(os.Stdout, "  -o, --output      Save body to file")
 	fmt.Fprintln(os.Stdout, "  --install-alias   Install zsh/bash alias to prevent url globbing")
 }

@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/quic-go/quic-go/http3"
 )
 
 type Options struct {
@@ -22,6 +24,7 @@ type Options struct {
 	Timeout time.Duration
 	Verbose bool
 	Timing  bool
+	HTTP3   bool
 }
 
 type RedirectHop struct {
@@ -130,8 +133,12 @@ func fetchSingle(opts Options, target string) (*Result, error) {
 
 func fetchSingleWithContext(ctx context.Context, opts Options, target string) (*Result, error) {
 	transport := tunedTransport()
+	var rt http.RoundTripper = transport
+	if opts.HTTP3 {
+		rt = &http3.RoundTripper{}
+	}
 	cli := &http.Client{
-		Transport: transport,
+		Transport: rt,
 		Timeout:   opts.Timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -288,6 +295,7 @@ func tunedTransport() *http.Transport {
 	dialer := &net.Dialer{
 		Timeout:   5 * time.Second,
 		KeepAlive: 30 * time.Second,
+		Control:   dialerControl,
 	}
 
 	return &http.Transport{
