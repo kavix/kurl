@@ -1,11 +1,10 @@
+//go:build ignore
+
 package main
 
 import (
-	"context"
 	"fmt"
-	"os"
 
-	"github.com/fullstorydev/grpcurl"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
