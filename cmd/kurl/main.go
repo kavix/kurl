@@ -77,6 +77,9 @@ func main() {
 		} else if cmd == "sse" {
 			handleSSECommand(os.Args[2:])
 			return
+		} else if strings.HasPrefix(cmd, "grpc://") || strings.HasPrefix(cmd, "grpcs://") {
+			handleGRPCCommand(os.Args[1:])
+			return
 		}
 	}
 
@@ -714,6 +717,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stdout, "Commands:")
 	fmt.Fprintln(os.Stdout, "  save <name> [args...] Save a request configuration locally")
 	fmt.Fprintln(os.Stdout, "  run <name> [overrides...] Replay a saved request configuration")
+	fmt.Fprintln(os.Stdout, "  grpc://<URL> [Method] [--list-services] [--proto <file>] Invoke a gRPC service")
 	fmt.Fprintln(os.Stdout, "")
 	fmt.Fprintln(os.Stdout, "Flags:")
 	fmt.Fprintln(os.Stdout, "  -e, --env         Environment profile name (dev/prod/etc.)")
@@ -726,6 +730,10 @@ func printUsage() {
 	fmt.Fprintln(os.Stdout, "  --body-only       Show only response body")
 	fmt.Fprintln(os.Stdout, "  --raw             Raw output, no formatting")
 	fmt.Fprintln(os.Stdout, "  -v, --verbose     Show request info too")
+	fmt.Fprintln(os.Stdout, "  -k, --insecure    Allow insecure server connections when using TLS")
+	fmt.Fprintln(os.Stdout, "  --cert            Client certificate file for mTLS")
+	fmt.Fprintln(os.Stdout, "  --key             Client key file for mTLS")
+	fmt.Fprintln(os.Stdout, "  --cacert          CA certificate to verify peer against")
 	fmt.Fprintln(os.Stdout, "  --timing          Show per-phase timing (DNS, TCP, TLS, TTFB, transfer)")
 	fmt.Fprintln(os.Stdout, "  --http3           Attempt HTTP/3 (QUIC) connection for 0-RTT handshakes")
 	fmt.Fprintln(os.Stdout, "  -o, --output      Save body to file")

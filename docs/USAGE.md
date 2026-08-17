@@ -38,6 +38,34 @@ kurl GET https://api.github.com/users/kavix \
   -H "Accept: application/vnd.github.v3+json"
 ```
 
+## 🔗 Native gRPC Client
+
+`kurl` supports invoking gRPC methods natively using JSON payloads. It automatically handles server reflection, proto file parsing, and formatting response streams.
+
+### Server Reflection
+To discover available services on a gRPC server:
+```bash
+kurl grpc://api.example.com:443 --list-services
+```
+
+### Invoking a Method
+Call a specific gRPC method. Note that you don't need to specify `POST`; `kurl` uses the gRPC protocol automatically.
+```bash
+kurl -d '{"id": "user-123"}' grpc://api.example.com:443 mypackage.MyService/GetUserInfo
+```
+
+### Local Proto Files
+If the server disables reflection, you can provide the local `.proto` file:
+```bash
+kurl --proto ./service.proto -d '{"id": "user-123"}' grpc://api.example.com:443 mypackage.MyService/GetUserInfo
+```
+
+### Secure Connections & mTLS
+By default, `grpc://` connects without TLS. Use `grpcs://` or rely on the `443` port to connect over TLS. You can also provide client certificates for mTLS:
+```bash
+kurl --cert client.crt --key client.key grpc://api.example.com:443 mypackage.MyService/MyMethod
+```
+
 ## 💾 Saving & Replaying Requests
 
 `kurl` allows you to save request configurations locally and replay them instantly (like a terminal-native Postman profile).
@@ -130,6 +158,11 @@ kurl --raw -o response.html https://example.com
 | `--verbose` | `-v` | Prints request headers and complete redirect trace | `false` |
 | `--output` | `-o` | Saves response body directly to a local file | *None* |
 | `--http3` | *None* | Attempt HTTP/3 (QUIC) connection for 0-RTT handshakes | `false` |
+| `--list-services`| *None* | List available gRPC services via reflection | `false` |
+| `--proto` | *None* | Local .proto file path for gRPC definitions | *None* |
+| `--cert` | *None* | Client certificate file for mTLS | *None* |
+| `--key` | *None* | Client private key file for mTLS | *None* |
+| `--cacert` | *None* | CA certificate to verify peer against | *None* |
 | `--version` | `-V` | Prints CLI build version, git commit, and date | `false` |
 
 ---

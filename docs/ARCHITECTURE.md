@@ -22,6 +22,7 @@ flowchart TD
         Protocol_Switch -- "ws:// / wss://" --> WS_Engine["WebSocket Duplex Loop<br/><code>websocket.go</code>"]
         Protocol_Switch -- "sse" --> SSE_Engine["Server-Sent Events Streamer<br/><code>internal/sse</code>"]
         Protocol_Switch -- "graphql" --> GQL_Engine["GraphQL Execution Engine<br/><code>internal/graphql</code>"]
+        Protocol_Switch -- "grpc:// / grpcs://" --> gRPC_Engine["gRPC Execution Engine<br/><code>internal/igrpc</code>"]
     end
 
     subgraph Network ["3. Concurrent Networking Core"]
@@ -124,6 +125,11 @@ Provides jq-like filtering directly inside `kurl`:
 ### E. GraphQL Native Integration (`internal/graphql`)
 * **Payload Serialization**: Wraps queries and variable JSON payloads (`--variables`) into standard POST HTTP requests.
 * **Introspection & Code Generation**: Auto-generates template queries via `--generate-query <Type>` and executes full schema introspection (`--introspect`).
+
+### F. gRPC Native Integration (`internal/igrpc`)
+* **Server Reflection & Protobuf**: Dynamically discovers methods using the gRPC Server Reflection Protocol or parses local `.proto` files into descriptor sources.
+* **Protocol Translators**: Connects standard terminal JSON standard-in/out to native binary protobuf payloads transparently over HTTP/2.
+* **mTLS Security**: Supports `grpcs://` multiplexing with custom `--cert`, `--key`, and `--cacert` validation.
 
 ---
 

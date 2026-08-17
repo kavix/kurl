@@ -2,7 +2,7 @@
 
 # ⚡ kurl
 
-### A modern, concurrent HTTP/GraphQL/SSE client for the terminal — built in Go.
+### A modern, concurrent HTTP/GraphQL/SSE/gRPC client for the terminal — built in Go.
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/kavix/kurl)](https://goreportcard.com/report/github.com/kavix/kurl)
 [![Build & Release Status](https://github.com/kavix/kurl/actions/workflows/auto-release.yml/badge.svg)](https://github.com/kavix/kurl/actions)
@@ -38,6 +38,7 @@ CLI HTTP clients have traditionally fallen into two extremes: **`curl`** (blazin
 | **Token-by-Token JSON Formatter** | ❌ | ✅ | ✅ *(Zero-Alloc Cache)* |
 | **Built-in JSONPath Filtering (`--filter`)** | ❌ *(Needs `jq`)* | ❌ *(Needs `jq`)* | ✅ *(Native Engine)* |
 | **Native GraphQL Client (`kurl graphql`)** | ❌ | ❌ | ✅ *(Query/Variables/Introspect)* |
+| **Native gRPC Client (`kurl grpc://`)** | ❌ | ❌ | ✅ *(Reflection, Protobuf, mTLS)* |
 | **Server-Sent Events (SSE) Streamer (`kurl sse`)** | ❌ | ❌ | ✅ *(W3C EventSource)* |
 | **Smart HTML5 DOM Pretty-Printer** | ❌ | ❌ | ✅ *(Inline Tag Collapsing)* |
 | **Anti-Bot Header Auto-Injection** | ❌ | ❌ | ✅ *(Cloudflare/WAF Bypass)* |
@@ -102,6 +103,9 @@ kurl run github-user -v
 
 # 7. Environment profiles (dev / staging / prod)
 kurl --env prod /users/search
+
+# 8. Invoke a gRPC service using server reflection
+kurl grpc://api.example.com:443 mypackage.MyService/MyMethod
 ```
 
 ---
@@ -150,7 +154,23 @@ kurl sse https://api.example.com/stream --sse-filter update
 kurl sse https://api.example.com/stream --sse-output sse_events.log
 ```
 
-### 4. ⚡ Triple-DNS Racing Resolver
+### 4. 🔗 Native gRPC Client (`kurl grpc://`)
+Test and debug gRPC microservices effortlessly without switching to a different tool:
+```bash
+# List available services via reflection
+kurl grpc://api.example.com:443 --list-services
+
+# Invoke a method with a JSON payload
+kurl -d '{"id": "123"}' grpc://api.example.com:443 mypackage.MyService/MyMethod
+
+# Use local .proto files instead of server reflection
+kurl --proto ./service.proto grpc://api.example.com:443 mypackage.MyService/MyMethod
+
+# Connect with mTLS certificates
+kurl --cert client.crt --key client.key grpc://api.example.com:443 mypackage.MyService/MyMethod
+```
+
+### 5. ⚡ Triple-DNS Racing Resolver
 Standard DNS resolvers can hang on VPNs or slow ISP servers. `kurl` simultaneously queries:
 1. **Cloudflare Public IPv4** (`1.1.1.1:53`)
 2. **Cloudflare Public IPv6** (`[2606:4700:4700::1111]:53`)
